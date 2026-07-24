@@ -35,6 +35,13 @@
 - Git: conventional commits (`feat:`, `fix:`, `chore:`, `docs:`).
 - Never hardcode secrets.
 
+## Public Repo Rules
+
+This is a public GitHub repository. Treat all committed files as public:
+- `MEMORY.md`, `docs/`, and all markdown files are visible to everyone.
+- Never write API keys, passwords, usernames, server IPs, or internal URLs into any of these files.
+- Secrets belong only in `.env` — which is gitignored and never committed.
+
 ## Behaviour
 
 1. Read `MEMORY.md` first.
