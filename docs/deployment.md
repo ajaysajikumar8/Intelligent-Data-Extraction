@@ -11,8 +11,11 @@
 
 ## Environment Variables
 
-Set all variables from `.env.example` in the platform's environment panel.
-The `NEXT_PUBLIC_` boundary is enforced by Next.js at build time regardless of platform.
+Set environment variables in your platform's web dashboard (Render, Railway, Vercel, PythonAnywhere):
+- For Backend: Use variables defined in `backend/.env.example` (`DATABASE_URL`, `GEMINI_API_KEY`, `SECRET_KEY`, etc.).
+- For Frontend: Use variables defined in `frontend/.env.example` (`NEXT_PUBLIC_API_BASE_URL`).
+
+The `NEXT_PUBLIC_` boundary is enforced by Next.js at build time regardless of platform. No `.env` files are required on production servers.
 
 ## Render
 

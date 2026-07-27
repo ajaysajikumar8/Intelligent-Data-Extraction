@@ -23,8 +23,8 @@
 
 ## Env Var Rules
 
-- Root `.env` is the single source of truth for both frontend and backend.
-- `frontend/.env.local` is a symlink to `../.env` — never edit it directly.
+- Maintain independent `.env` files per service for local dev (`backend/.env` and `frontend/.env.local`).
+- In production, set variables via the cloud platform dashboard (Render, Railway, Vercel).
 - `NEXT_PUBLIC_*` = browser-safe. Everything else = server-only.
 - Never reference a non-`NEXT_PUBLIC_` var in frontend `.ts`/`.tsx` files.
 

@@ -15,9 +15,11 @@ An automated multi-tenant AI ingestion engine that processes unstructured corpor
 ### 1. Environment
 
 ```bash
-cp .env.example .env
-# Fill in your values
-cd frontend && ln -s ../.env .env.local  # local dev only
+# Backend environment setup
+cp backend/.env.example backend/.env
+
+# Frontend environment setup
+cp frontend/.env.example frontend/.env.local
 ```
 
 ### 2. Backend
@@ -44,4 +46,4 @@ npm install && npm run dev
 
 ---
 
-See [`.env.example`](.env.example) for all environment variables.
+See [backend/.env.example](backend/.env.example) and [frontend/.env.example](frontend/.env.example) for environment variable templates.
