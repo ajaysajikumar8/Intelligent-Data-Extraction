@@ -1,0 +1,195 @@
+// Prisma Schema — Intelligent Data Extraction
+// Generator: prisma-client-py (async) | DB: PostgreSQL
+// Sync to DB: prisma db push
+// Generate client: prisma generate
+
+generator client {
+  provider             = "prisma-client-py"
+  interface            = "asyncio"
+  recursive_type_depth = 5
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// -----------------------------------------------------------------------------
+// Enums
+// -----------------------------------------------------------------------------
+
+enum Role {
+  OWNER
+  MEMBER
+}
+
+// Source — how a document entered the pipeline
+enum Source {
+  MANUAL   // User submitted via the dashboard (text paste or file upload)
+  API      // External system via REST API + workspace API key
+  EMAIL    // Email OAuth webhook push
+  WEBHOOK  // Generic inbound webhook (Zapier, Slack, etc.)
+}
+
+// ExtractionStatus — full pipeline lifecycle
+enum ExtractionStatus {
+  PENDING     // Received, not yet processed
+  PROCESSING  // Pipeline is actively running
+  SUCCESS     // Extraction completed and passed validation
+  FAILED      // Gemini error or Pydantic validation failure
+  UNMATCHED   // No template matched the document intent
+}
+
+// WebhookEventType — only final states are valid webhook filters
+// PENDING and PROCESSING are transient and can never meaningfully trigger delivery
+enum WebhookEventType {
+  SUCCESS
+  FAILED
+  UNMATCHED
+}
+
+// -----------------------------------------------------------------------------
+// Plan — billing tiers and quota limits
+// null on any quota field = unlimited
+// Seed with: free, pro, enterprise rows
+// -----------------------------------------------------------------------------
+
+model Plan {
+  id                     String   @id @default(uuid())
+  name                   String
+  slug                   String   @unique
+  maxExtractionsPerMonth Int?
+  maxTemplates           Int?
+  maxWebhooks            Int?
+  maxUsers               Int?
+  priceUsdCents          Int      @default(0)
+  isActive               Boolean  @default(true)
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  workspaces Workspace[]
+}
+
+// -----------------------------------------------------------------------------
+// Workspace — multi-tenancy root
+// Every user, template, document log, and webhook belongs to one workspace
+// -----------------------------------------------------------------------------
+
+model Workspace {
+  id        String   @id @default(uuid())
+  name      String
+  slug      String   @unique
+  apiKey    String   @unique @default(uuid())
+  planId    String
+  createdAt DateTime @default(now())
+
+  plan         Plan              @relation(fields: [planId], references: [id])
+  users        User[]
+  templates    Template[]
+  documentLogs DocumentLog[]
+  webhooks     WebhookEndpoint[]
+
+  @@index([planId])
+}
+
+// -----------------------------------------------------------------------------
+// User — auth + workspace membership
+// Supports email/password and Google OAuth (googleId nullable)
+// isActive = false is a soft-delete — preserves audit trail
+// -----------------------------------------------------------------------------
+
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  passwordHash String?
+  name         String?
+  googleId     String?  @unique
+  avatarUrl    String?
+  workspaceId  String
+  role         Role     @default(MEMBER)
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+
+  workspace    Workspace     @relation(fields: [workspaceId], references: [id])
+  documentLogs DocumentLog[]
+}
+
+// -----------------------------------------------------------------------------
+// Template — the extraction schema Gemini uses
+// schema: JSON object of { field: type } pairs Gemini extracts against
+// version increments on every schema update
+// isActive = false hides template without breaking past DocumentLog references
+// -----------------------------------------------------------------------------
+
+model Template {
+  id          String   @id @default(uuid())
+  workspaceId String
+  name        String
+  description String?
+  extractionSchema Json @map("schema")
+  version     Int      @default(1)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  workspace    Workspace     @relation(fields: [workspaceId], references: [id])
+  documentLogs DocumentLog[]
+}
+
+// -----------------------------------------------------------------------------
+// DocumentLog — immutable audit trail of every extraction
+// Created at pipeline entry (status=PENDING), updated as pipeline progresses
+// rawInput: set for text paste | rawInputUrl: set for file uploads (object storage)
+// templateId null = UNMATCHED | userId null = non-manual source
+// -----------------------------------------------------------------------------
+
+model DocumentLog {
+  id               String           @id @default(uuid())
+  workspaceId      String
+  templateId       String?
+  userId           String?
+  source           Source
+  status           ExtractionStatus @default(PENDING)
+  rawInput         String?
+  rawInputUrl      String?
+  fileName         String?
+  mimeType         String?
+  extractedJson    Json?
+  validationErrors Json?
+  processingMs     Int?
+  createdAt        DateTime         @default(now())
+
+  workspace Workspace  @relation(fields: [workspaceId], references: [id])
+  template  Template?  @relation(fields: [templateId], references: [id])
+  user      User?      @relation(fields: [userId], references: [id])
+
+  @@index([workspaceId])
+  @@index([workspaceId, createdAt])
+  @@index([workspaceId, status])
+  @@index([workspaceId, templateId])
+  @@index([workspaceId, source])
+}
+
+// -----------------------------------------------------------------------------
+// WebhookEndpoint — outbound delivery targets per workspace
+// eventTypes: filter by final pipeline state (empty = all)
+// templateIds: filter by template UUID (empty = all templates)
+// failureCount: consecutive failures — auto-disable at threshold
+// -----------------------------------------------------------------------------
+
+model WebhookEndpoint {
+  id           String             @id @default(uuid())
+  workspaceId  String
+  url          String
+  secret       String
+  description  String?
+  eventTypes   WebhookEventType[] @default([])
+  templateIds  String[]           @default([])
+  isActive     Boolean            @default(true)
+  lastPingAt   DateTime?
+  failureCount Int                @default(0)
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id])
+}

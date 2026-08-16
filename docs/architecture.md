@@ -104,15 +104,15 @@ intelligent-data-extraction/
 │   └── adr/                ← decision records
 ├── backend/
 │   ├── .env.example        # backend env template
+│   ├── prisma/
+│   │   └── schema.prisma   # DB schema — run all prisma commands from backend/
 │   └── app/
 │       ├── api/            # endpoints: ingest, templates, auth, logs
 │       ├── core/           # config, security, auth
 │       ├── models/         # Pydantic schemas
 │       ├── services/       # Gemini logic, webhook dispatcher
 │       └── main.py
-├── frontend/
-│   ├── .env.example        # frontend env template
-│   └── src/
-└── prisma/
-    └── schema.prisma
+└── frontend/
+    ├── .env.example        # frontend env template
+    └── src/
 ```
