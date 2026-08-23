@@ -50,11 +50,13 @@
 - [x] Build Workspace endpoints `backend/app/api/workspaces.py` (details, update name, rotate API key, list members)
 - [x] Register `api_router` in `backend/app/main.py` and verify test suite (3 passing tests)
 
-### 🔲 Phase 4: AI Extraction Engine (Gemini 1.5 Flash)
-- [ ] Integrate Gemini client service `backend/app/services/gemini_service.py`
-- [ ] Build 3-stage pipeline in `backend/app/services/extraction_pipeline.py`
-- [ ] Create dual-mode ingestion endpoint `backend/app/api/ingest.py` (JSON & Multipart)
-- [ ] Create Template management endpoints `backend/app/api/templates.py`
+- [2026-08-20] — Phase 4 complete: Gemini service wrapper, 3-stage extraction pipeline (classify → extract → validate), Template CRUD, dual-mode ingest endpoint (JSON + file), quota check — 10/10 tests passing.
+
+### ✅ Phase 4: AI Extraction Engine (Gemini 1.5 Flash)
+- [x] Integrate Gemini client service `backend/app/services/gemini_service.py`
+- [x] Build 3-stage pipeline in `backend/app/services/extraction_pipeline.py`
+- [x] Create dual-mode ingestion endpoint `backend/app/api/ingest.py` (JSON & file)
+- [x] Create Template management endpoints `backend/app/api/templates.py` (full CRUD, soft-delete, version bump)
 
 ### 🔲 Phase 5: Next.js Frontend Dashboard & Manual Ingestion UI
 - [ ] Scaffold Next.js application structure in `frontend/`
