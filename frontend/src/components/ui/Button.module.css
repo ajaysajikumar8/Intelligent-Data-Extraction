@@ -1,0 +1,98 @@
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  font-family: inherit;
+  font-weight: var(--font-medium);
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  cursor: pointer;
+  white-space: nowrap;
+  transition:
+    background-color var(--transition-fast),
+    border-color var(--transition-fast),
+    box-shadow var(--transition-fast),
+    opacity var(--transition-fast),
+    transform var(--transition-fast);
+  user-select: none;
+  position: relative;
+}
+
+.btn:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+/* Sizes */
+.sm { padding: 6px 12px; font-size: var(--text-sm); height: 32px; }
+.md { padding: 8px 16px; font-size: var(--text-base); height: 38px; }
+.lg { padding: 10px 20px; font-size: var(--text-md); height: 44px; }
+
+/* Variants */
+.primary {
+  background-color: var(--color-accent);
+  color: #fff;
+  border-color: var(--color-accent);
+}
+.primary:hover:not(:disabled) {
+  background-color: var(--color-accent-hover);
+  border-color: var(--color-accent-hover);
+  box-shadow: 0 0 0 3px var(--color-accent-glow);
+}
+
+.secondary {
+  background-color: var(--color-surface-2);
+  color: var(--color-text);
+  border-color: var(--color-border);
+}
+.secondary:hover:not(:disabled) {
+  background-color: var(--color-surface-3);
+  border-color: var(--color-border-focus);
+}
+
+.ghost {
+  background-color: transparent;
+  color: var(--color-text-muted);
+  border-color: transparent;
+}
+.ghost:hover:not(:disabled) {
+  background-color: var(--color-surface-2);
+  color: var(--color-text);
+}
+
+.danger {
+  background-color: var(--color-error-subtle);
+  color: var(--color-error);
+  border-color: var(--color-error-subtle);
+}
+.danger:hover:not(:disabled) {
+  background-color: var(--color-error);
+  color: #fff;
+  border-color: var(--color-error);
+}
+
+/* States */
+.btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.loading {
+  cursor: wait;
+}
+
+.hidden {
+  visibility: hidden;
+}
+
+/* Loading spinner */
+.spinner {
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  border: 2px solid transparent;
+  border-top-color: currentColor;
+  border-radius: 50%;
+  animation: spin 600ms linear infinite;
+}

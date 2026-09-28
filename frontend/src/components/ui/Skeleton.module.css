@@ -1,0 +1,25 @@
+.skeleton {
+  display: block;
+  background: linear-gradient(
+    90deg,
+    var(--color-surface-2) 25%,
+    var(--color-surface-3) 50%,
+    var(--color-surface-2) 75%
+  );
+  background-size: 400px 100%;
+  animation: shimmer 1.4s infinite linear;
+}
+
+.row {
+  border-bottom: 1px solid var(--color-border);
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-6);
+  background-color: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}

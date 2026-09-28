@@ -49,7 +49,7 @@ graph TD
     subgraph Delivery ["3. Audit Storage & Delivery"]
         DB[(PostgreSQL Audit Log)]
         Webhook[Client Webhook Push]
-        Dashboard[Next.js Admin Dashboard]
+        Dashboard[Vite + React Admin Dashboard]
     end
 
     Pydantic -->|Valid Structured JSON| DB
@@ -68,7 +68,7 @@ Email data can enter the pipeline in two distinct ways:
 
 ## Admin Dashboard — Key Screens
 
-The Next.js frontend exposes these primary screens to authenticated workspace users:
+The Vite + React SPA exposes these primary screens to authenticated workspace users:
 
 | Screen | Route (planned) | Purpose |
 |---|---|---|
@@ -89,7 +89,8 @@ The Next.js frontend exposes these primary screens to authenticated workspace us
 | Backend | Python, FastAPI, Pydantic |
 | AI Engine | Google Gemini 1.5 Flash |
 | Database | PostgreSQL, Prisma ORM |
-| Frontend | Next.js (TypeScript) |
+| Frontend (dashboard) | Vite + React (TypeScript) — `frontend/` |
+| Frontend (public site, future) | Next.js or Astro — separate package/repo, TBD |
 | Auth | JWT + optional Google OAuth |
 
 ## Repository Structure

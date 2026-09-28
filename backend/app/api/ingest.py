@@ -1,46 +1,41 @@
 """
-ingest.py — Dual-mode document ingestion endpoint.
+ingest.py — Document ingestion endpoint.
 
-POST /api/v1/ingest accepts two content modes:
-  • JSON mode      — Content-Type: application/json
-                     Body: {"rawInput": "text...", "source": "MANUAL"|"API"}
-  • Multipart mode — Content-Type: multipart/form-data
-                     Fields: file (UploadFile), source (optional)
+Routes
+------
+  POST /api/v1/ingest   — Single unified ingestion route.
+                          Accepts any combination of:
+                            • rawInput  (text)   — email body, pasted text, cover letter
+                            • file      (upload) — PDF, PNG, JPEG, or WebP attachment
+                          At least one must be present. When both are provided (hybrid),
+                          Gemini processes both sources in a single multimodal API call.
 
-Both modes:
-  1. Create a DocumentLog record at status=PENDING.
-  2. Check monthly extraction quota against the workspace's Plan.
-  3. Delegate to the extraction_pipeline, which updates the record
-     through PROCESSING → SUCCESS | FAILED | UNMATCHED.
-  4. Return the final DocumentLog as the response.
+  GET  /api/v1/ingest   — Paginated document log listing.
+
+The source field identifies the ingestion channel:
+  • MANUAL  — human user pasting/uploading via the dashboard
+  • API     — developer calling with an X-API-Key
+  • EMAIL   — automated email forwarding pipeline
+  • WEBHOOK — inbound trigger from Zapier, Make.com, etc.
 
 Authentication: Bearer JWT (dashboard users) or X-API-Key (integrations).
 """
 
 import logging
 from datetime import datetime, timezone
+from typing import Optional
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from prisma.models import User, Workspace
 
 from app.core.auth import get_current_user, get_current_workspace
 from app.core.db import db
-from app.models.schemas import DocumentLogResponse, Source
+from app.core.utils import validate_and_read_file
+from app.models.schemas import DocumentLogResponse, ExtractionStatus, Source
 from app.services import extraction_pipeline
 
 logger = logging.getLogger("app.api.ingest")
 router = APIRouter()
-
-# Allowed MIME types for file uploads
-ALLOWED_MIME_TYPES = {
-    "application/pdf",
-    "image/png",
-    "image/jpeg",
-    "image/webp",
-}
-
-# Max file size: 20 MB (Gemini inline data limit)
-MAX_FILE_SIZE_BYTES = 20 * 1024 * 1024
 
 
 # ---------------------------------------------------------------------------
@@ -57,9 +52,7 @@ async def _check_quota(workspace: Workspace) -> None:
         return  # Unlimited
 
     now = datetime.now(timezone.utc)
-    start_of_month = now.replace(
-        day=1, hour=0, minute=0, second=0, microsecond=0
-    )
+    start_of_month = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 
     count = await db.documentlog.count(
         where={
@@ -79,122 +72,128 @@ async def _check_quota(workspace: Workspace) -> None:
 
 
 # ---------------------------------------------------------------------------
-# POST /ingest — JSON mode
+# GET /ingest — Paginated document log listing
 # ---------------------------------------------------------------------------
 
-@router.post("/json", response_model=DocumentLogResponse, status_code=status.HTTP_201_CREATED)
-async def ingest_json(
-    raw_input: str,
-    source: Source = Source.MANUAL,
+@router.get("/", response_model=list[DocumentLogResponse])
+async def list_document_logs(
+    skip: int = Query(0, ge=0, description="Number of records to skip"),
+    limit: int = Query(20, ge=1, le=100, description="Max records to return"),
+    status: ExtractionStatus | None = Query(None, description="Filter by extraction status"),
+    source: Source | None = Query(None, description="Filter by ingestion source"),
+    workspace: Workspace = Depends(get_current_workspace),
+) -> list[DocumentLogResponse]:
+    """
+    Return a paginated list of DocumentLog records for the current workspace.
+
+    Supports optional filtering by extraction status and ingestion source.
+    Used by the dashboard overview and extraction logs pages.
+    """
+    where: dict = {"workspaceId": workspace.id}
+    if status is not None:
+        where["status"] = status.value
+    if source is not None:
+        where["source"] = source.value
+
+    logs = await db.documentlog.find_many(
+        where=where,  # type: ignore[arg-type]
+        skip=skip,
+        take=limit,
+        order={"createdAt": "desc"},
+    )
+
+    return [DocumentLogResponse.model_validate(log) for log in logs]
+
+
+# ---------------------------------------------------------------------------
+# POST /ingest — Single unified ingestion endpoint
+# ---------------------------------------------------------------------------
+
+@router.post("/", response_model=DocumentLogResponse, status_code=status.HTTP_201_CREATED)
+async def ingest(
+    raw_input: Optional[str] = Form(None, alias="rawInput"),
+    file: Optional[UploadFile] = File(None),
+    source: Source = Form(Source.MANUAL),
+    template_id: Optional[str] = Form(None, alias="templateId"),
     workspace: Workspace = Depends(get_current_workspace),
     current_user: User | None = Depends(get_current_user),
 ) -> DocumentLogResponse:
     """
-    JSON-mode ingestion endpoint.
+    Unified document ingestion endpoint.
 
-    Accepts a plain text body (email body, document text, structured notes)
-    and runs it through the full AI extraction pipeline.
+    Accepts any combination of:
+      • rawInput (text)   — email body, cover letter, pasted text
+      • file (upload)     — PDF, PNG, JPEG, or WebP attachment
 
-    The `source` field defaults to `MANUAL` (dashboard paste) but can be
-    set to `API` for programmatic callers.
+    Input modes:
+      • Text-only  : rawInput set, no file.
+      • File-only  : file set, no rawInput.
+      • Hybrid     : BOTH set. Gemini processes both sources in a single
+                     multimodal call (e.g. cover letter email + résumé PDF).
+
+    The source field identifies the ingestion channel:
+      • MANUAL  — human user on the dashboard (default)
+      • API     — developer calling directly with an API key
+      • EMAIL   — automated email forwarding pipeline
+      • WEBHOOK — inbound trigger from Zapier, Make.com, etc.
     """
-    if not raw_input or not raw_input.strip():
+    has_text = bool(raw_input and raw_input.strip())
+    has_file = file is not None
+
+    if not has_text and not has_file:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="rawInput must not be empty.",
+            detail="At least one of rawInput (text) or file must be provided.",
         )
+
+    # Read and validate file if present
+    file_bytes: bytes | None = None
+    content_type: str | None = None
+
+    if has_file:
+        file_bytes, content_type = await validate_and_read_file(file)
 
     await _check_quota(workspace)
 
-    # Create the DocumentLog record at PENDING
+    # Determine mode label for logging
+    if has_text and has_file:
+        mode = "hybrid"
+    elif has_text:
+        mode = "text"
+    else:
+        mode = "file"
+
+    # Build DocumentLog record
     create_data: dict = {
         "workspace": {"connect": {"id": workspace.id}},
         "source": source.value,  # type: ignore[arg-type]
         "status": "PENDING",
-        "rawInput": raw_input,
     }
+    if has_text:
+        create_data["rawInput"] = raw_input.strip()  # type: ignore[union-attr]
+    if has_file:
+        create_data["fileName"] = file.filename  # type: ignore[union-attr]
+        create_data["mimeType"] = content_type
     if current_user:
         create_data["user"] = {"connect": {"id": current_user.id}}
 
     doc_log = await db.documentlog.create(data=create_data)  # type: ignore[arg-type]
 
     logger.info(
-        "Ingest (JSON) started — doc_log: %s, workspace: %s", doc_log.id, workspace.id
-    )
-
-    # Run pipeline (updates doc_log in-place)
-    final_log = await extraction_pipeline.run(
-        doc_log_id=doc_log.id,
-        workspace_id=workspace.id,
-        raw_text=raw_input,
-    )
-
-    return DocumentLogResponse.model_validate(final_log)
-
-
-# ---------------------------------------------------------------------------
-# POST /ingest — Multipart/file mode
-# ---------------------------------------------------------------------------
-
-@router.post("/file", response_model=DocumentLogResponse, status_code=status.HTTP_201_CREATED)
-async def ingest_file(
-    file: UploadFile = File(...),
-    source: Source = Form(Source.MANUAL),
-    workspace: Workspace = Depends(get_current_workspace),
-    current_user: User | None = Depends(get_current_user),
-) -> DocumentLogResponse:
-    """
-    File-mode ingestion endpoint.
-
-    Accepts a PDF, PNG, or JPEG upload and runs it through the full AI
-    extraction pipeline. The file is passed as inline base64 data to Gemini
-    (no external object storage required for files under 20 MB).
-    """
-    # Validate MIME type
-    content_type = file.content_type or ""
-    if content_type not in ALLOWED_MIME_TYPES:
-        raise HTTPException(
-            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
-            detail=(
-                f"Unsupported file type '{content_type}'. "
-                f"Allowed: {', '.join(sorted(ALLOWED_MIME_TYPES))}"
-            ),
-        )
-
-    file_bytes = await file.read()
-
-    if len(file_bytes) > MAX_FILE_SIZE_BYTES:
-        raise HTTPException(
-            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            detail=f"File exceeds maximum size of {MAX_FILE_SIZE_BYTES // (1024 * 1024)} MB.",
-        )
-
-    await _check_quota(workspace)
-
-    file_create_data: dict = {
-        "workspace": {"connect": {"id": workspace.id}},
-        "source": source.value,  # type: ignore[arg-type]
-        "status": "PENDING",
-        "fileName": file.filename,
-        "mimeType": content_type,
-    }
-    if current_user:
-        file_create_data["user"] = {"connect": {"id": current_user.id}}
-
-    doc_log = await db.documentlog.create(data=file_create_data)  # type: ignore[arg-type]
-
-    logger.info(
-        "Ingest (file) started — doc_log: %s, file: %s, workspace: %s",
+        "Ingest [%s/%s] started — doc_log: %s, workspace: %s",
+        source.value,
+        mode,
         doc_log.id,
-        file.filename,
         workspace.id,
     )
 
     final_log = await extraction_pipeline.run(
         doc_log_id=doc_log.id,
         workspace_id=workspace.id,
+        raw_text=raw_input.strip() if has_text else None,
         file_bytes=file_bytes,
         mime_type=content_type,
+        target_template_id=template_id,
     )
 
     return DocumentLogResponse.model_validate(final_log)

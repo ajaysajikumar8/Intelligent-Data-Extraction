@@ -5,7 +5,7 @@ from prisma.models import User
 
 from app.core.auth import get_current_user
 from app.core.db import db
-from app.core.security import create_access_token, generate_api_key, hash_password, verify_password
+from app.core.security import create_access_token, generate_api_key, generate_inbound_secret, hash_password, verify_password
 from app.models.schemas import (
     Role,
     TokenResponse,
@@ -56,6 +56,7 @@ async def signup(payload: UserSignupRequest) -> TokenResponse:
             "name": ws_name,
             "slug": ws_slug,
             "apiKey": api_key,
+            "inboundSecret": generate_inbound_secret(),
             "planId": free_plan.id,
         }
     )

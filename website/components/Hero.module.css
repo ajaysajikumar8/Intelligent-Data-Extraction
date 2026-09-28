@@ -1,0 +1,137 @@
+.hero {
+  padding: 8rem 0 4rem;
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  position: relative;
+  overflow: hidden;
+}
+
+.hero::before {
+  content: '';
+  position: absolute;
+  top: -20%;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 80vw;
+  height: 80vw;
+  background: radial-gradient(circle, var(--accent-glow) 0%, rgba(0,0,0,0) 70%);
+  z-index: -1;
+}
+
+.content {
+  text-align: center;
+  max-width: 800px;
+  margin: 0 auto;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  border-radius: 9999px;
+  background: var(--surface-1);
+  border: 1px solid var(--border-color);
+  font-size: 0.875rem;
+  color: var(--text-muted);
+  margin-bottom: 2rem;
+}
+
+.badgeDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent-primary);
+  box-shadow: 0 0 10px var(--accent-primary);
+}
+
+.title {
+  font-size: clamp(3rem, 5vw, 4.5rem);
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+  margin-bottom: 1.5rem;
+}
+
+.subtitle {
+  font-size: 1.25rem;
+  color: var(--text-muted);
+  margin-bottom: 2.5rem;
+  max-width: 600px;
+  margin-inline: auto;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  margin-bottom: 4rem;
+}
+
+.mockupContainer {
+  max-width: 900px;
+  margin: 0 auto;
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+  animation-delay: 0.2s;
+}
+
+.mockupHeader {
+  display: flex;
+  align-items: center;
+  padding: 1rem;
+  background: rgba(0, 0, 0, 0.2);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.mockupDots {
+  display: flex;
+  gap: 6px;
+}
+
+.mockupDots span {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--surface-2);
+}
+
+.mockupDots span:nth-child(1) { background: #ef4444; }
+.mockupDots span:nth-child(2) { background: #f59e0b; }
+.mockupDots span:nth-child(3) { background: #10b981; }
+
+.mockupTitle {
+  flex: 1;
+  text-align: center;
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 0.875rem;
+  color: var(--text-muted);
+}
+
+.mockupBody {
+  padding: 2rem;
+  background: rgba(0, 0, 0, 0.4);
+}
+
+.codeSnippet {
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 0.95rem;
+  color: #a78bfa; /* subtle purple text */
+  text-align: left;
+  overflow-x: auto;
+}
+
+.codeSnippet code {
+  color: #e2e8f0;
+}
+
+@media (max-width: 768px) {
+  .actions {
+    flex-direction: column;
+  }
+  .actions > * {
+    width: 100%;
+  }
+}

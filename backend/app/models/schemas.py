@@ -26,12 +26,14 @@ class ExtractionStatus(str, Enum):
     SUCCESS = "SUCCESS"
     FAILED = "FAILED"
     UNMATCHED = "UNMATCHED"
+    NEEDS_REVIEW = "NEEDS_REVIEW"
 
 
 class WebhookEventType(str, Enum):
     SUCCESS = "SUCCESS"
     FAILED = "FAILED"
     UNMATCHED = "UNMATCHED"
+    NEEDS_REVIEW = "NEEDS_REVIEW"
 
 
 # ==============================================================================
@@ -77,6 +79,7 @@ class WorkspaceResponse(BaseModel):
     name: str
     slug: str
     apiKey: str
+    inboundSecret: str
     planId: str
     createdAt: datetime
 
@@ -139,16 +142,35 @@ class TokenPayload(BaseModel):
 # TEMPLATE SCHEMAS
 # ==============================================================================
 
+class LibraryTemplateResponse(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    slug: str
+    name: str
+    description: str | None = None
+    extractionSchema: dict[str, Any] = Field(..., alias="schema")
+
+    @computed_field  # type: ignore[misc]
+    @property
+    def fieldCount(self) -> int:
+        """Dynamically derived top-level key count in extraction schema."""
+        return len(self.extractionSchema.keys()) if isinstance(self.extractionSchema, dict) else 0
+
+
 class TemplateCreate(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     name: str = Field(..., min_length=1, max_length=100)
     description: str | None = Field(default=None, max_length=500)
-    schema: dict[str, Any] = Field(..., description="Target JSON schema dict for extraction target")
+    schema_: dict[str, Any] = Field(..., alias="schema", description="Target JSON schema dict for extraction target")
 
 
 class TemplateUpdate(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     name: str | None = Field(default=None, min_length=1, max_length=100)
     description: str | None = Field(default=None, max_length=500)
-    schema: dict[str, Any] | None = None
+    schema_: dict[str, Any] | None = Field(default=None, alias="schema")
     isActive: bool | None = None
 
 
@@ -206,6 +228,7 @@ class DocumentLogResponse(BaseModel):
     fileName: str | None = None
     mimeType: str | None = None
     extractedJson: dict[str, Any] | list[Any] | None = None
+    confidenceScores: dict[str, Any] | None = None
     validationErrors: list[Any] | dict[str, Any] | None = None
     processingMs: int | None = None
     createdAt: datetime
@@ -245,3 +268,49 @@ class WebhookResponse(BaseModel):
     failureCount: int
     createdAt: datetime
     updatedAt: datetime
+
+
+# ==============================================================================
+# WEBHOOK DELIVERY SCHEMAS
+# ==============================================================================
+
+class WebhookDeliveryResponse(BaseModel):
+    """Audit record for a single outbound webhook delivery attempt."""
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    webhookId: str
+    documentLogId: str
+    statusCode: int | None = None   # None = network failure before response
+    responseBody: str | None = None
+    durationMs: int | None = None
+    error: str | None = None
+    createdAt: datetime
+
+
+class InboundResponse(BaseModel):
+    message: str
+    document_log_id: str
+
+
+# ==============================================================================
+# INBOUND WEBHOOK SCHEMAS
+# ==============================================================================
+
+class InboundSecretResponse(BaseModel):
+    """Returned when a workspace's inbound secret is rotated or fetched."""
+    inboundSecret: str
+    inboundUrl: str   # Full URL the customer configures in SendGrid/Mailgun/Zapier
+    message: str = "Inbound webhook URL ready."
+
+
+# ==============================================================================
+# DOCUMENT LOG DETAIL (AUDIT TRAIL)
+# ==============================================================================
+
+class DocumentLogDetailResponse(DocumentLogResponse):
+    """
+    Extended document log response including webhook delivery history.
+    Returned by GET /api/v1/logs/{id}.
+    """
+    webhookDeliveries: list[WebhookDeliveryResponse] = Field(default_factory=list)

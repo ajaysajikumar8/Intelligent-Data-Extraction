@@ -49,9 +49,11 @@ app = FastAPI(
 # CORS Middleware
 # --------------------------------------------------------------------------- #
 def _configure_cors(application: FastAPI, settings: Settings) -> None:
+    # Strip trailing slash — browsers send Origin without one, so they must match exactly.
+    origin = settings.FRONTEND_URL.rstrip("/")
     application.add_middleware(
         CORSMiddleware,
-        allow_origins=[str(settings.FRONTEND_URL)],
+        allow_origins=[origin],
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],

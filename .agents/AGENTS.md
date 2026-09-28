@@ -7,7 +7,8 @@
 | Layer | Tech |
 |---|---|
 | Backend | Python / FastAPI |
-| Frontend | Next.js (TypeScript) |
+| Frontend (dashboard) | Vite + React (TypeScript) |
+| Frontend (public site, future) | Next.js or Astro — separate app, separate deploy |
 | Database | PostgreSQL + Prisma ORM |
 | AI | Google Gemini API |
 | Auth | JWT + optional Google OAuth |
@@ -25,8 +26,8 @@
 
 - Maintain independent `.env` files per service for local dev (`backend/.env` and `frontend/.env.local`).
 - In production, set variables via the cloud platform dashboard (Render, Railway, Vercel).
-- `NEXT_PUBLIC_*` = browser-safe. Everything else = server-only.
-- Never reference a non-`NEXT_PUBLIC_` var in frontend `.ts`/`.tsx` files.
+- `VITE_*` = browser-safe (Vite inlines these at build time). Everything else = server-only.
+- Never reference a non-`VITE_` var in frontend `.ts`/`.tsx` files.
 
 ## Standards
 

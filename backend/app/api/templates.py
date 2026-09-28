@@ -16,13 +16,19 @@ DELETE /api/v1/templates/{id}     — Soft-delete (isActive = false)
 import logging
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from prisma.models import Workspace
 from prisma.fields import Json
 
 from app.core.auth import get_current_workspace
 from app.core.db import db
-from app.models.schemas import TemplateCreate, TemplateResponse, TemplateUpdate
+from app.core.template_library import LIBRARY_TEMPLATES, get_library_template
+from app.models.schemas import (
+    TemplateCreate,
+    TemplateResponse,
+    TemplateUpdate,
+    LibraryTemplateResponse,
+)
 
 logger = logging.getLogger("app.api.templates")
 router = APIRouter()
@@ -76,7 +82,7 @@ async def create_template(
         data={
             "name": payload.name,
             "description": payload.description,
-            "extractionSchema": Json(payload.schema),  # type: ignore[arg-type]
+            "extractionSchema": Json(payload.schema_),  # type: ignore[arg-type]
             "workspace": {"connect": {"id": workspace.id}},
         }
     )
@@ -90,11 +96,65 @@ async def create_template(
 
 
 # ---------------------------------------------------------------------------
+# GET /templates/library — List System Templates
+# ---------------------------------------------------------------------------
+
+@router.get("/library", response_model=list[LibraryTemplateResponse])
+async def list_library_templates(
+    workspace: Workspace = Depends(get_current_workspace),
+) -> list[LibraryTemplateResponse]:
+    """
+    List all pre-built system templates available in the library.
+    These are served from static configuration, not the database.
+    """
+    return [LibraryTemplateResponse(**t) for t in LIBRARY_TEMPLATES]
+
+
+# ---------------------------------------------------------------------------
+# POST /templates/library/{slug}/duplicate — Duplicate System Template
+# ---------------------------------------------------------------------------
+
+@router.post("/library/{slug}/duplicate", response_model=TemplateResponse, status_code=status.HTTP_201_CREATED)
+async def duplicate_library_template(
+    slug: str,
+    workspace: Workspace = Depends(get_current_workspace),
+) -> TemplateResponse:
+    """
+    Duplicate a pre-built library template into the user's workspace.
+    """
+    lib_template = get_library_template(slug)
+    if not lib_template:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Library template '{slug}' not found.",
+        )
+
+    # Insert a new row for this user's workspace
+    template = await db.template.create(
+        data={
+            "name": lib_template["name"],
+            "description": lib_template.get("description"),
+            "extractionSchema": Json(lib_template["schema"]),  # type: ignore[arg-type]
+            "workspace": {"connect": {"id": workspace.id}},
+        }
+    )
+    logger.info(
+        "Library template '%s' duplicated as (ID: %s) for workspace %s",
+        slug,
+        template.id,
+        workspace.id,
+    )
+    return _to_response(template)
+
+
+# ---------------------------------------------------------------------------
 # GET /templates — List
 # ---------------------------------------------------------------------------
 
 @router.get("", response_model=list[TemplateResponse])
 async def list_templates(
+    skip: int = Query(0, ge=0, description="Number of records to skip"),
+    limit: int = Query(20, ge=1, le=100, description="Max records to return"),
     workspace: Workspace = Depends(get_current_workspace),
     include_inactive: bool = False,
 ) -> list[TemplateResponse]:
@@ -110,6 +170,8 @@ async def list_templates(
 
     templates = await db.template.find_many(
         where=where,
+        skip=skip,
+        take=limit,
         order={"createdAt": "desc"},
     )
     return [_to_response(t) for t in templates]
@@ -172,8 +234,8 @@ async def update_template(
         update_data["description"] = payload.description
     if payload.isActive is not None:
         update_data["isActive"] = payload.isActive
-    if payload.schema is not None:
-        update_data["extractionSchema"] = Json(payload.schema)  # type: ignore[assignment]
+    if payload.schema_ is not None:
+        update_data["extractionSchema"] = Json(payload.schema_)  # type: ignore[assignment]
         update_data["version"] = existing.version + 1
 
     if not update_data:

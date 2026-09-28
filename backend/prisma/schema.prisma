@@ -36,6 +36,7 @@ enum ExtractionStatus {
   PENDING     // Received, not yet processed
   PROCESSING  // Pipeline is actively running
   SUCCESS     // Extraction completed and passed validation
+  NEEDS_REVIEW // Extraction succeeded but with low/medium confidence, waiting for human
   FAILED      // Gemini error or Pydantic validation failure
   UNMATCHED   // No template matched the document intent
 }
@@ -44,6 +45,7 @@ enum ExtractionStatus {
 // PENDING and PROCESSING are transient and can never meaningfully trigger delivery
 enum WebhookEventType {
   SUCCESS
+  NEEDS_REVIEW
   FAILED
   UNMATCHED
 }
@@ -76,12 +78,17 @@ model Plan {
 // -----------------------------------------------------------------------------
 
 model Workspace {
-  id        String   @id @default(uuid())
-  name      String
-  slug      String   @unique
-  apiKey    String   @unique @default(uuid())
-  planId    String
-  createdAt DateTime @default(now())
+  id             String   @id @default(uuid())
+  name           String
+  slug           String   @unique
+  apiKey         String   @unique @default(uuid())
+  // inboundSecret: cryptographically unguessable token embedded in inbound webhook
+  // URL. Third-party email services (SendGrid, Mailgun) POST to:
+  //   POST /api/v1/inbound/{inboundSecret}
+  // Rotatable from the Settings page to revoke a leaked URL.
+  inboundSecret  String   @unique
+  planId         String
+  createdAt      DateTime @default(now())
 
   plan         Plan              @relation(fields: [planId], references: [id])
   users        User[]
@@ -112,6 +119,8 @@ model User {
 
   workspace    Workspace     @relation(fields: [workspaceId], references: [id])
   documentLogs DocumentLog[]
+
+  @@index([workspaceId])
 }
 
 // -----------------------------------------------------------------------------
@@ -134,6 +143,9 @@ model Template {
 
   workspace    Workspace     @relation(fields: [workspaceId], references: [id])
   documentLogs DocumentLog[]
+  corrections  ExtractionCorrection[]
+
+  @@index([workspaceId])
 }
 
 // -----------------------------------------------------------------------------
@@ -155,13 +167,16 @@ model DocumentLog {
   fileName         String?
   mimeType         String?
   extractedJson    Json?
+  confidenceScores Json?
   validationErrors Json?
   processingMs     Int?
   createdAt        DateTime         @default(now())
 
-  workspace Workspace  @relation(fields: [workspaceId], references: [id])
-  template  Template?  @relation(fields: [templateId], references: [id])
-  user      User?      @relation(fields: [userId], references: [id])
+  workspace         Workspace         @relation(fields: [workspaceId], references: [id])
+  template          Template?         @relation(fields: [templateId], references: [id])
+  user              User?             @relation(fields: [userId], references: [id])
+  webhookDeliveries WebhookDelivery[]
+  correction        ExtractionCorrection?
 
   @@index([workspaceId])
   @@index([workspaceId, createdAt])
@@ -191,5 +206,53 @@ model WebhookEndpoint {
   createdAt    DateTime           @default(now())
   updatedAt    DateTime           @updatedAt
 
-  workspace Workspace @relation(fields: [workspaceId], references: [id])
+  workspace  Workspace         @relation(fields: [workspaceId], references: [id])
+  deliveries WebhookDelivery[]
+
+  @@index([workspaceId])
+}
+
+// -----------------------------------------------------------------------------
+// WebhookDelivery — audit log of every outbound delivery attempt
+// One row per dispatch attempt; keeps full HTTP response for debugging.
+// statusCode null = network-level failure before a response was received.
+// -----------------------------------------------------------------------------
+
+model WebhookDelivery {
+  id              String   @id @default(uuid())
+  webhookId       String
+  documentLogId   String
+  statusCode      Int?
+  responseBody    String?
+  durationMs      Int?
+  error           String?
+  createdAt       DateTime @default(now())
+
+  webhook     WebhookEndpoint @relation(fields: [webhookId], references: [id])
+  documentLog DocumentLog     @relation(fields: [documentLogId], references: [id])
+
+  @@index([webhookId])
+  @@index([documentLogId])
+}
+
+// -----------------------------------------------------------------------------
+// ExtractionCorrection — stores human corrections to AI output
+// Used for prompt injection (few-shot learning)
+// -----------------------------------------------------------------------------
+
+model ExtractionCorrection {
+  id              String      @id @default(uuid())
+  documentLogId   String      @unique
+  templateId      String
+  
+  originalJson    Json
+  correctedJson   Json
+  templateVersion Int
+  createdAt       DateTime    @default(now())
+
+  documentLog     DocumentLog @relation(fields: [documentLogId], references: [id])
+  template        Template    @relation(fields: [templateId], references: [id])
+
+  @@index([templateId])
+  @@index([templateId, templateVersion])
 }

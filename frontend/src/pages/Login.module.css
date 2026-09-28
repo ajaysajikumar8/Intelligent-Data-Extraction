@@ -1,0 +1,78 @@
+.page {
+  min-height: 100dvh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-5);
+  background-color: var(--color-bg);
+  /* Subtle radial gradient behind the card */
+  background-image: radial-gradient(
+    ellipse 80% 60% at 50% 0%,
+    var(--color-accent-subtle) 0%,
+    transparent 70%
+  );
+}
+
+.card {
+  width: 100%;
+  max-width: 400px;
+  background-color: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-10) var(--space-8);
+  box-shadow: var(--shadow-lg);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-4);
+  animation: scaleIn 220ms ease;
+}
+
+.logoWrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: var(--space-2);
+}
+
+.logo {
+  width: 48px;
+  height: 48px;
+  background: linear-gradient(135deg, var(--color-accent), #818cf8);
+  border-radius: var(--radius-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  box-shadow: 0 4px 16px var(--color-accent-glow);
+}
+
+.title {
+  font-size: var(--text-2xl);
+  font-weight: var(--font-bold);
+  color: var(--color-text);
+  text-align: center;
+  margin: 0;
+}
+
+.sub {
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+  text-align: center;
+  margin: 0;
+}
+
+.form {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  margin-top: var(--space-2);
+}
+
+.footer {
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+  text-align: center;
+  margin-top: var(--space-2);
+}

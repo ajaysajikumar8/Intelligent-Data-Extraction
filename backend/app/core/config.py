@@ -1,6 +1,6 @@
-from pydantic_settings import BaseSettings, SettingsConfigDict
-from pydantic import AnyHttpUrl
 from functools import lru_cache
+
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     # Google Gemini AI
     # ------------------------------------------------------------------ #
     GEMINI_API_KEY: str
+    GEMINI_MODEL: str = "gemini-3.6-flash"
 
     # ------------------------------------------------------------------ #
     # JWT Authentication
@@ -36,7 +37,13 @@ class Settings(BaseSettings):
     # ------------------------------------------------------------------ #
     # CORS
     # ------------------------------------------------------------------ #
-    FRONTEND_URL: AnyHttpUrl = "http://localhost:3000"  # type: ignore[assignment]
+    # Use plain str — AnyHttpUrl adds a trailing slash which breaks CORS origin matching.
+    FRONTEND_URL: str = "http://localhost:5173"
+
+    # ------------------------------------------------------------------ #
+    # Public API base URL — used to build inbound webhook URLs shown to customers
+    # ------------------------------------------------------------------ #
+    API_BASE_URL: str = "http://localhost:8000"
 
     # ------------------------------------------------------------------ #
     # Google OAuth (optional — required only from Phase 3 onwards)
@@ -44,6 +51,11 @@ class Settings(BaseSettings):
     GOOGLE_CLIENT_ID: str | None = None
     GOOGLE_CLIENT_SECRET: str | None = None
     GOOGLE_REDIRECT_URI: str | None = None
+
+    # ------------------------------------------------------------------ #
+    # SendGrid Inbound Parse (optional — ECDSA signature verification)
+    # ------------------------------------------------------------------ #
+    SENDGRID_WEBHOOK_PUBLIC_KEY: str | None = None
 
 
 @lru_cache

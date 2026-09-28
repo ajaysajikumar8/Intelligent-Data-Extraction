@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="Intelligent Data Extraction — AI-powered document processing dashboard" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <title>IDE Dashboard</title>
+
+    <!--
+      FOUC Prevention: Apply the correct theme before React mounts to avoid
+      a flash of the wrong theme. Reads from localStorage, falls back to
+      the OS preference.
+    -->
+    <script>
+      (function () {
+        try {
+          var stored = localStorage.getItem('theme-mode') || 'system';
+          var prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+          var resolved = stored === 'system' ? (prefersDark ? 'dark' : 'light') : stored;
+          document.documentElement.setAttribute('data-theme', resolved);
+        } catch (e) {
+          document.documentElement.setAttribute('data-theme', 'dark');
+        }
+      })();
+    </script>
+
+    <!-- Inter font — loaded via Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

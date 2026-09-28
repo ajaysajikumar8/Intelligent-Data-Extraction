@@ -1,0 +1,85 @@
+.howItWorksSection {
+  padding: 6rem 0;
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.sectionTitle {
+  text-align: center;
+  font-size: 2.5rem;
+  margin-bottom: 4rem;
+}
+
+.timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+  max-width: 800px;
+  margin: 0 auto;
+  position: relative;
+}
+
+.timeline::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 2rem;
+  width: 2px;
+  background: var(--border-color);
+  z-index: 0;
+}
+
+.step {
+  display: flex;
+  align-items: flex-start;
+  gap: 2rem;
+  position: relative;
+  z-index: 1;
+}
+
+.stepNumber {
+  width: 4rem;
+  height: 4rem;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--background);
+  border: 2px solid var(--accent-primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: bold;
+  font-size: 1.25rem;
+  color: var(--accent-primary);
+  box-shadow: 0 0 20px var(--accent-glow);
+}
+
+.stepContent {
+  flex: 1;
+  padding: 2rem;
+  border-radius: 12px;
+  margin-top: 0.5rem;
+}
+
+.stepTitle {
+  font-size: 1.25rem;
+  margin-bottom: 0.5rem;
+}
+
+.stepDesc {
+  color: var(--text-muted);
+  line-height: 1.6;
+}
+
+@media (max-width: 640px) {
+  .timeline::before {
+    left: 1.5rem;
+  }
+  .step {
+    gap: 1rem;
+  }
+  .stepNumber {
+    width: 3rem;
+    height: 3rem;
+    font-size: 1rem;
+  }
+}

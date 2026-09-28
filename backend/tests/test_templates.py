@@ -125,6 +125,55 @@ async def test_template_crud_lifecycle():
 
 
 @pytest.mark.asyncio
+async def test_template_library_features():
+    """Verify that users can fetch library templates and duplicate them."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        email = f"lib_test_{uuid4().hex[:6]}@example.com"
+        signup_res = await client.post(
+            "/api/v1/auth/signup",
+            json={
+                "email": email,
+                "password": "Password123!",
+                "workspaceName": "Lib Test WS",
+            },
+        )
+        assert signup_res.status_code == 201
+        token = signup_res.json()["access_token"]
+        headers = {"Authorization": f"Bearer {token}"}
+        workspace_id = signup_res.json()["workspace"]["id"]
+        user_id = signup_res.json()["user"]["id"]
+
+        # 1. Get Library
+        lib_res = await client.get("/api/v1/templates/library", headers=headers)
+        assert lib_res.status_code == 200
+        library = lib_res.json()
+        assert len(library) > 0
+        assert "slug" in library[0]
+
+        # 2. Duplicate Template
+        slug_to_dup = library[0]["slug"]
+        dup_res = await client.post(f"/api/v1/templates/library/{slug_to_dup}/duplicate", headers=headers)
+        assert dup_res.status_code == 201
+        new_template = dup_res.json()
+        assert new_template["name"] == library[0]["name"]
+        assert new_template["workspaceId"] == workspace_id
+        
+        # Verify it shows up in my templates
+        list_res = await client.get("/api/v1/templates", headers=headers)
+        assert any(t["id"] == new_template["id"] for t in list_res.json())
+
+        # 3. NotFound duplicate
+        not_found_res = await client.post("/api/v1/templates/library/invalid-slug-999/duplicate", headers=headers)
+        assert not_found_res.status_code == 404
+
+        # Cleanup
+        await db.template.delete(where={"id": new_template["id"]})
+        await db.user.delete(where={"id": user_id})
+        await db.workspace.delete(where={"id": workspace_id})
+
+
+@pytest.mark.asyncio
 async def test_template_workspace_isolation():
     """A template created in workspace A should not be visible from workspace B."""
     transport = ASGITransport(app=app)

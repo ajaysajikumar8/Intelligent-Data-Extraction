@@ -5,6 +5,8 @@ We patch `app.services.gemini_service.generate_text` so tests run without
 a real Gemini API key and without network calls, while still exercising the
 full pipeline logic — quota checking, DocumentLog lifecycle, Stage 1 classify,
 Stage 2 extract, Stage 3 validate.
+
+All tests hit POST /api/v1/ingest/ — the single unified endpoint.
 """
 
 import json
@@ -67,9 +69,9 @@ async def _signup_and_create_template(client: AsyncClient) -> tuple[str, str, st
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_ingest_json_success():
+async def test_ingest_text_success():
     """
-    Full pipeline with a mocked Gemini that:
+    Full text-only pipeline with mocked Gemini:
     - Stage 1 returns the correct template ID (classification)
     - Stage 2 returns a valid JSON blob (extraction)
     """
@@ -93,8 +95,8 @@ async def test_ingest_json_success():
             new=AsyncMock(side_effect=[template_id, extracted_payload]),
         ):
             res = await client.post(
-                "/api/v1/ingest/json",
-                params={"raw_input": "Please process this invoice from Acme Corp, INV-2024-001, total $1234.56"},
+                "/api/v1/ingest/",
+                data={"rawInput": "Please process this invoice from Acme Corp, INV-2024-001, total $1234.56"},
                 headers=headers,
             )
 
@@ -119,7 +121,7 @@ async def test_ingest_json_success():
 
 
 @pytest.mark.asyncio
-async def test_ingest_json_unmatched():
+async def test_ingest_text_unmatched():
     """
     When Gemini returns UNMATCHED in Stage 1, the DocumentLog should be
     status=UNMATCHED and no extraction should occur.
@@ -136,8 +138,8 @@ async def test_ingest_json_unmatched():
             new=AsyncMock(return_value="UNMATCHED"),
         ):
             res = await client.post(
-                "/api/v1/ingest/json",
-                params={"raw_input": "This is an unrecognisable document."},
+                "/api/v1/ingest/",
+                data={"rawInput": "This is an unrecognisable document."},
                 headers=headers,
             )
 
@@ -155,7 +157,7 @@ async def test_ingest_json_unmatched():
 
 
 @pytest.mark.asyncio
-async def test_ingest_json_validation_failure():
+async def test_ingest_text_validation_failure():
     """
     When Gemini extraction returns malformed JSON, the pipeline should
     set status=FAILED and populate validationErrors.
@@ -172,8 +174,8 @@ async def test_ingest_json_validation_failure():
             new=AsyncMock(side_effect=[template_id, "this is not valid json {{{"]),
         ):
             res = await client.post(
-                "/api/v1/ingest/json",
-                params={"raw_input": "Invoice from Acme Corp"},
+                "/api/v1/ingest/",
+                data={"rawInput": "Invoice from Acme Corp"},
                 headers=headers,
             )
 
@@ -190,8 +192,8 @@ async def test_ingest_json_validation_failure():
 
 
 @pytest.mark.asyncio
-async def test_ingest_empty_body_rejected():
-    """Empty rawInput should be rejected with HTTP 422."""
+async def test_ingest_no_input_rejected():
+    """Submitting with no rawInput and no file should return HTTP 422."""
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         email = f"empty_{uuid4().hex[:6]}@example.com"
@@ -204,8 +206,8 @@ async def test_ingest_empty_body_rejected():
         user_id = res.json()["user"]["id"]
 
         bad_res = await client.post(
-            "/api/v1/ingest/json",
-            params={"raw_input": "   "},
+            "/api/v1/ingest/",
+            data={},  # no rawInput, no file
             headers={"Authorization": f"Bearer {token}"},
         )
         assert bad_res.status_code == 422
@@ -230,7 +232,7 @@ async def test_ingest_file_wrong_mime_rejected():
         user_id = res.json()["user"]["id"]
 
         bad_res = await client.post(
-            "/api/v1/ingest/file",
+            "/api/v1/ingest/",
             files={"file": ("test.txt", b"some text content", "text/plain")},
             headers={"Authorization": f"Bearer {token}"},
         )

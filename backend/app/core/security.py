@@ -59,3 +59,38 @@ def generate_api_key() -> str:
     Generate a secure random UUID string for workspace API keys.
     """
     return str(uuid.uuid4())
+
+
+def generate_inbound_secret() -> str:
+    """
+    Generate a cryptographically unguessable secret token for inbound webhook URLs.
+
+    The token is embedded in the URL path:
+        POST /api/v1/inbound/{inboundSecret}
+
+    Using 32 random bytes (256-bit entropy) encoded as hex, making it
+    virtually impossible to brute-force or guess.
+    """
+    import secrets
+    return secrets.token_hex(32)
+
+
+def hmac_sign(secret: str, payload: bytes) -> str:
+    """
+    Compute an HMAC-SHA256 signature of `payload` using `secret`.
+
+    Used for two purposes:
+      1. Outbound webhook delivery: we sign the JSON payload we send to
+         customer servers so they can verify it came from us.
+      2. Inbound provider verification: we re-compute the provider's
+         HMAC signature (e.g. Mailgun) to verify the request is genuine.
+
+    Returns a hex-encoded signature string.
+    """
+    import hashlib
+    import hmac as _hmac
+    return _hmac.new(
+        secret.encode("utf-8"),
+        payload,
+        hashlib.sha256,
+    ).hexdigest()

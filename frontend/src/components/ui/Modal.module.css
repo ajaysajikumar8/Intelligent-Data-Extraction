@@ -1,0 +1,60 @@
+.backdrop {
+  position: fixed;
+  inset: 0;
+  background-color: var(--color-overlay);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: var(--space-4);
+  animation: fadeIn 150ms ease;
+}
+
+.panel {
+  background-color: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  display: flex;
+  flex-direction: column;
+  max-height: 90vh;
+  width: 100%;
+  animation: scaleIn 200ms ease;
+}
+
+.sm { max-width: 400px; }
+.md { max-width: 560px; }
+.lg { max-width: 760px; }
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-5) var(--space-6);
+  border-bottom: 1px solid var(--color-border);
+  flex-shrink: 0;
+}
+
+.title {
+  font-size: var(--text-lg);
+  font-weight: var(--font-semibold);
+  color: var(--color-text);
+}
+
+.body {
+  padding: var(--space-6);
+  overflow-y: auto;
+  flex: 1;
+}
+
+.footer {
+  padding: var(--space-4) var(--space-6);
+  border-top: 1px solid var(--color-border);
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-3);
+  flex-shrink: 0;
+}

@@ -1,11 +1,14 @@
 """
-gemini_service.py — Async wrapper around Google Gemini 1.5 Flash.
+gemini_service.py — Async wrapper around Google Gemini Flash.
 
 Responsibilities:
   - Initialise the Gemini client once from GEMINI_API_KEY.
-  - Provide a simple `generate_text` method for plain-text prompts.
-  - Provide a `generate_with_file` method for inline binary content
+  - Provide `generate_text` for plain-text-only prompts.
+  - Provide `generate_with_file` for file-only multimodal prompts
     (PDF / PNG / JPEG passed as base64-encoded bytes).
+  - Provide `generate_with_text_and_file` for hybrid prompts where
+    both a text body (e.g. email cover letter) AND a file attachment
+    (e.g. resume PDF) are present in the same document submission.
   - All public methods return a plain string — callers are responsible
     for JSON-parsing the result.
 """
@@ -40,7 +43,7 @@ def _get_model() -> genai.GenerativeModel:
     settings = get_settings()
     genai.configure(api_key=settings.GEMINI_API_KEY)
     return genai.GenerativeModel(
-        model_name=MODEL_NAME,
+        model_name=settings.GEMINI_MODEL,
         generation_config=GENERATION_CONFIG,
     )
 
@@ -119,4 +122,58 @@ async def generate_with_file(
         )
 
     logger.debug("Received Gemini multimodal response (%d chars)", len(response.text))
+    return response.text.strip()
+
+
+async def generate_with_text_and_file(
+    prompt: str,
+    text_body: str,
+    file_bytes: bytes,
+    mime_type: str,
+) -> str:
+    """
+    Send a hybrid multimodal prompt to Gemini containing BOTH a text body
+    (e.g. email / cover letter) AND an inline binary file attachment
+    (e.g. a resume PDF or invoice scan).
+
+    Gemini will reason across both sources simultaneously in a single
+    API call, extracting fields that may span either the text or the file.
+
+    Args:
+        prompt:     The instruction/question to accompany the inputs.
+        text_body:  The text content (email body, cover letter, etc.).
+        file_bytes: Raw bytes of the attached file.
+        mime_type:  MIME type string, e.g. "application/pdf", "image/png".
+
+    Returns:
+        Gemini's response as a stripped string.
+
+    Raises:
+        RuntimeError: If Gemini returns an empty or blocked response.
+    """
+    model = _get_model()
+    logger.debug(
+        "Sending hybrid prompt to Gemini (text: %d chars, file: %d bytes, mime: %s)",
+        len(text_body),
+        len(file_bytes),
+        mime_type,
+    )
+
+    inline_data = {
+        "inline_data": {
+            "mime_type": mime_type,
+            "data": base64.b64encode(file_bytes).decode("utf-8"),
+        }
+    }
+
+    # Pass [instruction_prompt, text_body, file] so Gemini sees both sources
+    response = await model.generate_content_async([prompt, text_body, inline_data])
+
+    if not response.text:
+        raise RuntimeError(
+            "Gemini returned an empty response for the hybrid input. "
+            "The request may have been blocked by safety filters."
+        )
+
+    logger.debug("Received Gemini hybrid response (%d chars)", len(response.text))
     return response.text.strip()
