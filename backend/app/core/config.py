@@ -25,7 +25,14 @@ class Settings(BaseSettings):
     # Google Gemini AI
     # ------------------------------------------------------------------ #
     GEMINI_API_KEY: str
-    GEMINI_MODEL: str = "gemini-3.6-flash"
+    GEMINI_MODEL: str = "gemini-2.0-flash"
+
+    # ------------------------------------------------------------------ #
+    # Encryption — Fernet key for encrypting BYOAK Gemini keys at rest
+    # Generate with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+    # If unset, keys are stored as plaintext (acceptable for local dev only).
+    # ------------------------------------------------------------------ #
+    ENCRYPTION_KEY: str | None = None
 
     # ------------------------------------------------------------------ #
     # JWT Authentication

@@ -25,8 +25,11 @@ python-jose[cryptography]==3.3.0
 passlib[bcrypt]==1.7.4
 python-multipart==0.0.12
 
-# Google Gemini AI
-google-generativeai==0.8.3
+# Google Gemini AI (new unified SDK — supports per-client API key instances for BYOAK)
+google-genai==1.5.0
+
+# Encryption (for storing user Gemini API keys at rest)
+cryptography==43.0.3
 
 # HTTP Client (for webhook dispatcher — Phase 6)
 httpx==0.28.0

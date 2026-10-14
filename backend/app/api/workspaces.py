@@ -3,14 +3,18 @@ from prisma.models import User, Workspace
 
 from app.core.auth import get_current_user, get_current_workspace, require_role
 from app.core.db import db
+from app.core.encryption import encrypt
 from app.core.security import generate_api_key
 from app.models.schemas import (
+    GeminiKeyUpdate,
+    GeminiKeyUpdateResponse,
     Role,
     UserResponse,
     WorkspaceRotateApiKeyResponse,
     WorkspaceUpdate,
     WorkspaceWithPlanResponse,
 )
+from app.services import gemini_service
 
 router = APIRouter()
 
@@ -71,6 +75,51 @@ async def rotate_workspace_api_key(
         data={"apiKey": new_api_key},
     )
     return WorkspaceRotateApiKeyResponse(apiKey=new_api_key)
+
+
+@router.put("/current/gemini-key", response_model=GeminiKeyUpdateResponse)
+async def save_gemini_key(
+    payload: GeminiKeyUpdate,
+    current_user: User = Depends(require_role(Role.OWNER)),
+) -> GeminiKeyUpdateResponse:
+    """
+    Validate and save the workspace's custom Gemini API key (BYOAK).
+    Restricted to workspace OWNER role.
+
+    The key is verified with a live, lightweight Gemini call before being
+    encrypted (Fernet, ENCRYPTION_KEY) and written to the database — this
+    catches typos/revoked keys at save time instead of at extraction time.
+    """
+    try:
+        await gemini_service.validate_api_key(payload.apiKey)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(e),
+        )
+
+    await db.workspace.update(
+        where={"id": current_user.workspaceId},
+        data={"geminiApiKey": encrypt(payload.apiKey)},
+    )
+    return GeminiKeyUpdateResponse()
+
+
+@router.delete("/current/gemini-key", response_model=WorkspaceWithPlanResponse)
+async def delete_gemini_key(
+    current_user: User = Depends(require_role(Role.OWNER)),
+) -> WorkspaceWithPlanResponse:
+    """
+    Remove the workspace's custom Gemini API key.
+    Restricted to workspace OWNER role. Extractions fall back to the
+    platform key logic governed by `allowPlatformFallback`.
+    """
+    updated_workspace = await db.workspace.update(
+        where={"id": current_user.workspaceId},
+        data={"geminiApiKey": None},
+        include={"plan": True},
+    )
+    return WorkspaceWithPlanResponse.model_validate(updated_workspace)
 
 
 @router.get("/current/members", response_model=list[UserResponse])

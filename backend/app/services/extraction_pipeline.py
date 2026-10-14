@@ -64,16 +64,25 @@ async def run(
     file_bytes: bytes | None = None,
     mime_type: str | None = None,
     target_template_id: str | None = None,
+    custom_api_key: str | None = None,
+    allow_platform_fallback: bool = False,
 ) -> DocumentLog:
     """
     Execute the 3-stage extraction pipeline for a given DocumentLog record.
 
+    API Key routing (in priority order):
+      1. custom_api_key  — workspace's BYOAK Gemini key (decrypted by caller).
+      2. Platform key    — only used if allow_platform_fallback is True.
+         • If custom_api_key is set and hits quota, retries with platform key
+           ("platform_fallback").
+         • If custom_api_key is None and allow_platform_fallback is True,
+           uses the platform key directly ("platform").
+         • If neither condition is met, fails immediately with a clear error.
+
     Input modes (at least one must be provided):
       • Text-only  : raw_text set, file_bytes None.
       • File-only  : file_bytes + mime_type set, raw_text None.
-      • Hybrid     : BOTH raw_text AND file_bytes set. Gemini receives both
-                    sources in a single multimodal call (e.g. email body +
-                    résumé PDF / invoice scan + cover note).
+      • Hybrid     : BOTH raw_text AND file_bytes set.
 
     If `target_template_id` is provided, Stage 1 (AI intent classification)
     is skipped and that specific template schema is used directly.
@@ -81,6 +90,35 @@ async def run(
     Returns the final DocumentLog record after updating status in the DB.
     """
     start_ms = time.monotonic()
+
+    # ------------------------------------------------------------------
+    # Resolve which API key to use
+    # ------------------------------------------------------------------
+    # Determine the active key upfront. If no usable key is available,
+    # fail immediately with a clear, actionable error message.
+    active_key: str | None = custom_api_key  # None = use platform key
+
+    if not custom_api_key and not allow_platform_fallback:
+        # No custom key and platform fallback is off — nothing to use
+        processing_ms = int((time.monotonic() - start_ms) * 1000)
+        logger.warning(
+            "[%s] No API key configured and platform fallback disabled — failing",
+            doc_log_id,
+        )
+        return await db.documentlog.update(
+            where={"id": doc_log_id},
+            data={
+                "status": "FAILED",
+                "processingMs": processing_ms,
+                "validationErrors": Json({  # type: ignore[arg-type]
+                    "error": (
+                        "No AI key configured. Add your Gemini API key in "
+                        "Settings → AI Integration, or enable Platform Key "
+                        "Fallback on a paid plan."
+                    )
+                }),
+            },
+        )
 
     # Mark as PROCESSING
     await db.documentlog.update(
@@ -118,12 +156,18 @@ async def run(
             # ------------------------------------------------------------------ #
             # Stage 1: Intent Classification (Auto-detect)
             # ------------------------------------------------------------------ #
-            matched_template = await _classify(
+            matched_template = await _call_with_fallback(
                 doc_log_id=doc_log_id,
-                templates=templates,
-                raw_text=raw_text,
-                file_bytes=file_bytes,
-                mime_type=mime_type,
+                custom_api_key=custom_api_key,
+                allow_platform_fallback=allow_platform_fallback,
+                fn=lambda key: _classify(
+                    doc_log_id=doc_log_id,
+                    templates=templates,
+                    raw_text=raw_text,
+                    file_bytes=file_bytes,
+                    mime_type=mime_type,
+                    api_key=key,
+                ),
             )
 
             if matched_template is None:
@@ -146,12 +190,18 @@ async def run(
         # ------------------------------------------------------------------ #
         # Stage 2: Schema Extraction
         # ------------------------------------------------------------------ #
-        raw_json_str = await _extract(
+        raw_json_str = await _call_with_fallback(
             doc_log_id=doc_log_id,
-            template=matched_template,
-            raw_text=raw_text,
-            file_bytes=file_bytes,
-            mime_type=mime_type,
+            custom_api_key=custom_api_key,
+            allow_platform_fallback=allow_platform_fallback,
+            fn=lambda key: _extract(
+                doc_log_id=doc_log_id,
+                template=matched_template,
+                raw_text=raw_text,
+                file_bytes=file_bytes,
+                mime_type=mime_type,
+                api_key=key,
+            ),
         )
 
         # ------------------------------------------------------------------ #

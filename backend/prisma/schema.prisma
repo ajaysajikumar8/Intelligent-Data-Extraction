@@ -90,6 +90,16 @@ model Workspace {
   planId         String
   createdAt      DateTime @default(now())
 
+  // BYOAK — Bring Your Own API Key
+  // Stores the workspace owner's Gemini API key, encrypted at rest with Fernet.
+  // null = no custom key configured; extractions use the platform key instead
+  // (only if allowPlatformFallback is true).
+  geminiApiKey          String?
+  // Kill switch: must be explicitly enabled by the workspace owner to allow
+  // the platform Gemini key to be used (and billed) on their behalf.
+  // Defaults to false — platform budget is NEVER spent without explicit opt-in.
+  allowPlatformFallback Boolean  @default(false)
+
   plan         Plan              @relation(fields: [planId], references: [id])
   users        User[]
   templates    Template[]

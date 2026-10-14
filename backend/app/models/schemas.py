@@ -82,6 +82,14 @@ class WorkspaceResponse(BaseModel):
     inboundSecret: str
     planId: str
     createdAt: datetime
+    allowPlatformFallback: bool = False
+    geminiApiKey: str | None = Field(default=None, exclude=True)
+
+    @computed_field  # type: ignore[misc]
+    @property
+    def geminiApiKeySet(self) -> bool:
+        """True when a custom BYOAK key is configured. Never exposes the raw value."""
+        return bool(self.geminiApiKey)
 
 
 class WorkspaceRotateApiKeyResponse(BaseModel):
@@ -91,6 +99,15 @@ class WorkspaceRotateApiKeyResponse(BaseModel):
 
 class WorkspaceWithPlanResponse(WorkspaceResponse):
     plan: PlanResponse
+
+
+class GeminiKeyUpdate(BaseModel):
+    apiKey: str = Field(..., min_length=10, max_length=200)
+
+
+class GeminiKeyUpdateResponse(BaseModel):
+    status: str = "ok"
+    geminiApiKeySet: bool = True
 
 
 # ==============================================================================
