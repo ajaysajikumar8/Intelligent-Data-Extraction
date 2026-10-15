@@ -12,7 +12,7 @@ from app.models.schemas import (
     UserLoginRequest,
     UserResponse,
     UserSignupRequest,
-    WorkspaceResponse,
+    WorkspaceWithPlanResponse,
 )
 
 logger = logging.getLogger("app.api.auth")
@@ -58,7 +58,8 @@ async def signup(payload: UserSignupRequest) -> TokenResponse:
             "apiKey": api_key,
             "inboundSecret": generate_inbound_secret(),
             "planId": free_plan.id,
-        }
+        },
+        include={"plan": True},
     )
 
     user = await db.user.create(
@@ -84,7 +85,7 @@ async def signup(payload: UserSignupRequest) -> TokenResponse:
         access_token=access_token,
         token_type="bearer",
         user=UserResponse.model_validate(user),
-        workspace=WorkspaceResponse.model_validate(workspace),
+        workspace=WorkspaceWithPlanResponse.model_validate(workspace),
     )
 
 
@@ -108,7 +109,7 @@ async def login(payload: UserLoginRequest) -> TokenResponse:
             detail="Account is deactivated. Contact workspace owner.",
         )
 
-    workspace = await db.workspace.find_unique(where={"id": user.workspaceId})
+    workspace = await db.workspace.find_unique(where={"id": user.workspaceId}, include={"plan": True})
     if not workspace:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -127,7 +128,7 @@ async def login(payload: UserLoginRequest) -> TokenResponse:
         access_token=access_token,
         token_type="bearer",
         user=UserResponse.model_validate(user),
-        workspace=WorkspaceResponse.model_validate(workspace),
+        workspace=WorkspaceWithPlanResponse.model_validate(workspace),
     )
 
 
@@ -137,7 +138,7 @@ async def get_me(current_user: User = Depends(get_current_user)) -> TokenRespons
     Authenticated User Profile Endpoint.
     Returns currently logged-in user profile, role, and workspace metadata.
     """
-    workspace = await db.workspace.find_unique(where={"id": current_user.workspaceId})
+    workspace = await db.workspace.find_unique(where={"id": current_user.workspaceId}, include={"plan": True})
     if not workspace:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -157,5 +158,5 @@ async def get_me(current_user: User = Depends(get_current_user)) -> TokenRespons
         access_token=access_token,
         token_type="bearer",
         user=UserResponse.model_validate(current_user),
-        workspace=WorkspaceResponse.model_validate(workspace),
+        workspace=WorkspaceWithPlanResponse.model_validate(workspace),
     )

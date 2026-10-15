@@ -8,6 +8,7 @@ from app.core.security import generate_api_key
 from app.models.schemas import (
     GeminiKeyUpdate,
     GeminiKeyUpdateResponse,
+    PlatformFallbackUpdate,
     Role,
     UserResponse,
     WorkspaceRotateApiKeyResponse,
@@ -117,6 +118,38 @@ async def delete_gemini_key(
     updated_workspace = await db.workspace.update(
         where={"id": current_user.workspaceId},
         data={"geminiApiKey": None},
+        include={"plan": True},
+    )
+    return WorkspaceWithPlanResponse.model_validate(updated_workspace)
+
+
+@router.put("/current/platform-fallback", response_model=WorkspaceWithPlanResponse)
+async def set_platform_fallback(
+    payload: PlatformFallbackUpdate,
+    current_user: User = Depends(require_role(Role.OWNER)),
+) -> WorkspaceWithPlanResponse:
+    """
+    Toggle the Platform Key Fallback kill switch.
+    Restricted to workspace OWNER role.
+
+    Enabling it is explicit consent to be billed for platform Gemini usage
+    when the workspace's own key (if any) hits quota — so it requires an
+    active paid plan. Disabling it is always allowed.
+    """
+    if payload.enabled:
+        workspace = await db.workspace.find_unique(
+            where={"id": current_user.workspaceId},
+            include={"plan": True},
+        )
+        if not workspace or not workspace.plan or workspace.plan.priceUsdCents <= 0:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Platform Key Fallback requires a paid plan. Upgrade to enable this.",
+            )
+
+    updated_workspace = await db.workspace.update(
+        where={"id": current_user.workspaceId},
+        data={"allowPlatformFallback": payload.enabled},
         include={"plan": True},
     )
     return WorkspaceWithPlanResponse.model_validate(updated_workspace)

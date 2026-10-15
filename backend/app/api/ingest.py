@@ -30,6 +30,7 @@ from prisma.models import User, Workspace
 
 from app.core.auth import get_current_user, get_current_workspace
 from app.core.db import db
+from app.core.encryption import decrypt
 from app.core.utils import validate_and_read_file
 from app.models.schemas import DocumentLogResponse, ExtractionStatus, Source
 from app.services import extraction_pipeline
@@ -187,6 +188,8 @@ async def ingest(
         workspace.id,
     )
 
+    custom_api_key = decrypt(workspace.geminiApiKey) if workspace.geminiApiKey else None
+
     final_log = await extraction_pipeline.run(
         doc_log_id=doc_log.id,
         workspace_id=workspace.id,
@@ -194,6 +197,8 @@ async def ingest(
         file_bytes=file_bytes,
         mime_type=content_type,
         target_template_id=template_id,
+        custom_api_key=custom_api_key,
+        allow_platform_fallback=workspace.allowPlatformFallback,
     )
 
     return DocumentLogResponse.model_validate(final_log)

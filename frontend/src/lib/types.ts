@@ -35,6 +35,18 @@ export interface UserResponse {
   createdAt: string
 }
 
+export interface PlanResponse {
+  id: string
+  name: string
+  slug: string
+  maxExtractionsPerMonth: number | null
+  maxTemplates: number | null
+  maxWebhooks: number | null
+  maxUsers: number | null
+  priceUsdCents: number
+  isActive: boolean
+}
+
 export interface WorkspaceResponse {
   id: string
   name: string
@@ -43,6 +55,9 @@ export interface WorkspaceResponse {
   inboundSecret: string
   planId: string
   createdAt: string
+  plan: PlanResponse
+  geminiApiKeySet: boolean
+  allowPlatformFallback: boolean
 }
 
 export interface TokenResponse {

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Copy, KeyRound, RefreshCw, Shield, Users, Webhook } from 'lucide-react'
+import { Bot, Copy, KeyRound, RefreshCw, Shield, Users, Webhook } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { workspaces, webhooks } from '../lib/api'
 import { getUser, getWorkspace, setWorkspace } from '../lib/auth'
@@ -25,6 +25,11 @@ export function Settings() {
   const [inboundVisible, setInboundVisible] = useState(false)
   const [rotatingInbound, setRotatingInbound] = useState(false)
   const [showInboundDocs, setShowInboundDocs] = useState(false)
+
+  const [geminiKeyInput, setGeminiKeyInput] = useState('')
+  const [savingGeminiKey, setSavingGeminiKey] = useState(false)
+  const [deletingGeminiKey, setDeletingGeminiKey] = useState(false)
+  const [togglingFallback, setTogglingFallback] = useState(false)
 
   useEffect(() => {
     workspaces.listMembers().then(setMembers).finally(() => setLoadingMembers(false))
@@ -63,6 +68,57 @@ export function Settings() {
 
   const copyKey = () => {
     navigator.clipboard.writeText(ws?.apiKey ?? '').then(() => toast.success('Copied!'))
+  }
+
+  const handleSaveGeminiKey = async () => {
+    if (!geminiKeyInput.trim()) return
+    setSavingGeminiKey(true)
+    try {
+      await workspaces.saveGeminiKey(geminiKeyInput.trim())
+      if (ws) {
+        const updated = { ...ws, geminiApiKeySet: true }
+        setWs(updated)
+        setWorkspace(updated)
+      }
+      setGeminiKeyInput('')
+      toast.success('Gemini API key saved')
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : 'Could not save the key')
+    } finally { setSavingGeminiKey(false) }
+  }
+
+  const handleDeleteGeminiKey = async () => {
+    if (!confirm('Remove your custom Gemini API key? Extractions will stop using it immediately.')) return
+    setDeletingGeminiKey(true)
+    try {
+      const updated = await workspaces.deleteGeminiKey()
+      setWs(updated)
+      setWorkspace(updated)
+      toast.success('Gemini API key removed')
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : 'Could not remove the key')
+    } finally { setDeletingGeminiKey(false) }
+  }
+
+  const handleTogglePlatformFallback = async () => {
+    if (!ws) return
+    const enabling = !ws.allowPlatformFallback
+
+    if (enabling && ws.plan.priceUsdCents <= 0) {
+      toast.error('Platform fallback requires a paid plan. Upgrade to enable this.')
+      return
+    }
+    if (enabling && !confirm('This may incur charges. Enable platform fallback?')) return
+
+    setTogglingFallback(true)
+    try {
+      const updated = await workspaces.setPlatformFallback(enabling)
+      setWs(updated)
+      setWorkspace(updated)
+      toast.success(enabling ? 'Platform fallback enabled' : 'Platform fallback disabled')
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : 'Could not update platform fallback')
+    } finally { setTogglingFallback(false) }
   }
 
   const handleRotateInbound = async () => {
@@ -176,6 +232,63 @@ export function Settings() {
                 <RefreshCw size={13} /> Rotate
               </Button>
             </div>
+          </div>
+        </div>
+      </section>
+
+      {/* AI Integration */}
+      <section className={styles.section}>
+        <div className={styles.sectionHeader}>
+          <Bot size={18} />
+          <h2 className={styles.sectionTitle}>AI Integration</h2>
+        </div>
+        <div className={styles.card}>
+          <div>
+            <p className={styles.rowLabel}>Your Gemini API Key</p>
+            <p className={styles.rowDesc}>
+              {ws?.geminiApiKeySet
+                ? 'A custom key is configured. Extractions use it first.'
+                : 'No custom key — extractions use the platform key, if fallback is enabled.'}
+            </p>
+          </div>
+          <div className={styles.fieldGroup}>
+            <Input
+              label="Gemini API key"
+              id="settings-gemini-key"
+              placeholder="AIzaSy..."
+              value={geminiKeyInput}
+              onChange={(e) => setGeminiKeyInput(e.target.value)}
+            />
+            <Button loading={savingGeminiKey} onClick={handleSaveGeminiKey} size="sm" variant="secondary">
+              Save Key
+            </Button>
+            {ws?.geminiApiKeySet && (
+              <Button loading={deletingGeminiKey} onClick={handleDeleteGeminiKey} size="sm" variant="ghost">
+                Remove
+              </Button>
+            )}
+          </div>
+
+          <div className={styles.row} style={{ borderTop: '1px solid var(--color-border)', paddingTop: 'var(--space-5)' }}>
+            <div>
+              <p className={styles.rowLabel}>Platform Key Fallback</p>
+              <p className={styles.rowDesc}>
+                If your key hits its quota, use the platform key. This will incur usage charges on your account.
+              </p>
+              <p className={styles.rowDesc}>
+                {ws && ws.plan.priceUsdCents > 0
+                  ? `Requires a paid plan. Currently: ${ws.plan.name} ✓`
+                  : 'Requires a paid plan. Currently: Free → Upgrade'}
+              </p>
+            </div>
+            <Button
+              loading={togglingFallback}
+              onClick={handleTogglePlatformFallback}
+              size="sm"
+              variant={ws?.allowPlatformFallback ? 'secondary' : 'primary'}
+            >
+              {ws?.allowPlatformFallback ? 'Disable Fallback' : 'Enable Fallback'}
+            </Button>
           </div>
         </div>
       </section>

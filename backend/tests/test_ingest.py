@@ -45,6 +45,14 @@ async def _signup_and_create_template(client: AsyncClient) -> tuple[str, str, st
     user_id = data["user"]["id"]
     headers = {"Authorization": f"Bearer {token}"}
 
+    # These tests exercise the extraction pipeline itself (classify/extract/
+    # validate), not the BYOAK key-gating logic, so opt this workspace into
+    # platform-key usage directly rather than via the paid-plan-gated endpoint.
+    await db.workspace.update(
+        where={"id": workspace_id},
+        data={"allowPlatformFallback": True},
+    )
+
     tmpl_res = await client.post(
         "/api/v1/templates",
         json={
@@ -213,6 +221,45 @@ async def test_ingest_no_input_rejected():
         assert bad_res.status_code == 422
 
         # Cleanup
+        await db.user.delete(where={"id": user_id})
+        await db.workspace.delete(where={"id": workspace_id})
+
+
+@pytest.mark.asyncio
+async def test_ingest_blocked_without_key_or_fallback():
+    """
+    BYOAK gate: a workspace with no custom Gemini key AND platform fallback
+    disabled (the default for every new workspace) must be blocked before
+    any Gemini call is made — we never spend platform budget without
+    explicit opt-in.
+    """
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        email = f"nokey_{uuid4().hex[:8]}@example.com"
+        res = await client.post(
+            "/api/v1/auth/signup",
+            json={"email": email, "password": "Password123!"},
+        )
+        assert res.status_code == 201, res.text
+        data = res.json()
+        token = data["access_token"]
+        workspace_id = data["workspace"]["id"]
+        user_id = data["user"]["id"]
+        assert data["workspace"]["allowPlatformFallback"] is False
+
+        res = await client.post(
+            "/api/v1/ingest/",
+            data={"rawInput": "Invoice from Acme Corp, total $100."},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert res.status_code == 201, res.text
+        data = res.json()
+        assert data["status"] == "FAILED"
+        assert "No AI key configured" in data["validationErrors"]["error"]
+
+        # Cleanup
+        await db.documentlog.delete(where={"id": data["id"]})
         await db.user.delete(where={"id": user_id})
         await db.workspace.delete(where={"id": workspace_id})
 

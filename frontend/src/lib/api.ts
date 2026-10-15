@@ -138,6 +138,23 @@ export const workspaces = {
     }),
 
   listMembers: () => request<WorkspaceMember[]>('/workspaces/current/members'),
+
+  /** Validate and save a custom Gemini API key (BYOAK). Throws ApiError(422) if invalid. */
+  saveGeminiKey: (apiKey: string) =>
+    request<{ status: string; geminiApiKeySet: boolean }>('/workspaces/current/gemini-key', {
+      method: 'PUT',
+      body: JSON.stringify({ apiKey }),
+    }),
+
+  deleteGeminiKey: () =>
+    request<WorkspaceResponse>('/workspaces/current/gemini-key', { method: 'DELETE' }),
+
+  /** Toggle the Platform Key Fallback kill switch. Throws ApiError(403) on a free plan. */
+  setPlatformFallback: (enabled: boolean) =>
+    request<WorkspaceResponse>('/workspaces/current/platform-fallback', {
+      method: 'PUT',
+      body: JSON.stringify({ enabled }),
+    }),
 }
 
 // ── Template endpoints ─────────────────────────────────────────────────────

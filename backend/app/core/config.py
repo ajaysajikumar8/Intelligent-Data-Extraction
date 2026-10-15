@@ -1,6 +1,16 @@
+import logging
 from functools import lru_cache
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+logger = logging.getLogger("app.core.config")
+
+# Required at runtime — missing or blank values make every request fail in
+# confusing ways downstream (DB connect errors, Gemini 401s, etc). Checked
+# explicitly at startup so misconfiguration fails loudly and immediately
+# instead of surfacing later as an unrelated-looking error.
+_REQUIRED_KEYS = ("DATABASE_URL", "GEMINI_API_KEY", "SECRET_KEY")
 
 
 class Settings(BaseSettings):
@@ -25,7 +35,7 @@ class Settings(BaseSettings):
     # Google Gemini AI
     # ------------------------------------------------------------------ #
     GEMINI_API_KEY: str
-    GEMINI_MODEL: str = "gemini-2.0-flash"
+    GEMINI_MODEL: str = "gemini-3.8-flash"
 
     # ------------------------------------------------------------------ #
     # Encryption — Fernet key for encrypting BYOAK Gemini keys at rest
@@ -63,6 +73,30 @@ class Settings(BaseSettings):
     # SendGrid Inbound Parse (optional — ECDSA signature verification)
     # ------------------------------------------------------------------ #
     SENDGRID_WEBHOOK_PUBLIC_KEY: str | None = None
+
+    @model_validator(mode="after")
+    def _check_required_env_vars(self) -> "Settings":
+        """
+        Pydantic already rejects a completely missing required field, but not
+        one set to an empty/whitespace string (e.g. `GEMINI_API_KEY=`) — that
+        silently passes validation and only fails later, deep in a request.
+        Catch that here so a blank value is rejected the same way a missing
+        one is, with every offending key reported at once.
+        """
+        blank = [key for key in _REQUIRED_KEYS if not getattr(self, key).strip()]
+        if blank:
+            raise ValueError(
+                f"Required environment variable(s) are missing or blank: {', '.join(blank)}. "
+                "Set them in backend/.env (local dev) or the platform dashboard (production)."
+            )
+
+        if not self.ENCRYPTION_KEY or not self.ENCRYPTION_KEY.strip():
+            logger.warning(
+                "ENCRYPTION_KEY is not set — BYOAK Gemini keys will be stored as "
+                "plaintext. Fine for local dev; set it before any production deployment."
+            )
+
+        return self
 
 
 @lru_cache

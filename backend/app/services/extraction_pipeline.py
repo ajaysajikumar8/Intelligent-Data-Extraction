@@ -28,7 +28,7 @@ import asyncio
 import json
 import logging
 import time
-from typing import Any
+from typing import Any, Awaitable, Callable, TypeVar
 
 from pydantic import BaseModel, ValidationError, create_model
 from prisma.models import DocumentLog, Template
@@ -243,7 +243,7 @@ async def run(
             data={
                 "status": final_status,
                 "extractedJson": Json(extracted_data),  # type: ignore[arg-type]
-                "confidenceScores": Json(confidence_scores) if confidence_scores else None,  # type: ignore[arg-type]
+                "confidenceScores": Json(confidence_scores if confidence_scores else None),  # type: ignore[arg-type]
                 "processingMs": processing_ms,
             },
         )
@@ -265,6 +265,39 @@ async def run(
         return final_log
 
 
+T = TypeVar("T")
+
+
+async def _call_with_fallback(
+    doc_log_id: str,
+    custom_api_key: str | None,
+    allow_platform_fallback: bool,
+    fn: Callable[[str | None], Awaitable[T]],
+) -> T:
+    """
+    Call `fn` with the workspace's custom BYOAK key if set.
+
+    If the custom key hits a quota/rate-limit error and the workspace has
+    opted into platform fallback, retry once with the platform key
+    (fn(None) — see gemini_service._get_client). Any other error, or a quota
+    error with fallback disabled, propagates so the pipeline fails loudly
+    with a clear message instead of silently burning platform budget.
+    """
+    if not custom_api_key:
+        return await fn(None)  # No custom key — caller already verified fallback is allowed.
+
+    try:
+        return await fn(custom_api_key)
+    except Exception as exc:
+        if allow_platform_fallback and gemini_service.is_quota_error(exc):
+            logger.warning(
+                "[%s] Custom Gemini key quota exhausted — falling back to platform key",
+                doc_log_id,
+            )
+            return await fn(None)
+        raise
+
+
 # ---------------------------------------------------------------------------
 # Stage 1 — Intent Classifier
 # ---------------------------------------------------------------------------
@@ -275,6 +308,7 @@ async def _classify(
     raw_text: str | None,
     file_bytes: bytes | None,
     mime_type: str | None,
+    api_key: str | None = None,
 ) -> Template | None:
     """
     Ask Gemini which template best matches the document.
@@ -311,15 +345,17 @@ async def _classify(
             text_body=raw_text,
             file_bytes=file_bytes,
             mime_type=mime_type or "application/octet-stream",
+            api_key=api_key,
         )
     elif raw_text:
         prompt += raw_text
-        response = await gemini_service.generate_text(prompt)
+        response = await gemini_service.generate_text(prompt, api_key=api_key)
     else:
         response = await gemini_service.generate_with_file(
             prompt=prompt,
             file_bytes=file_bytes,  # type: ignore[arg-type]
             mime_type=mime_type or "application/octet-stream",
+            api_key=api_key,
         )
 
     response = response.strip()
@@ -350,6 +386,7 @@ async def _extract(
     raw_text: str | None,
     file_bytes: bytes | None,
     mime_type: str | None,
+    api_key: str | None = None,
 ) -> str:
     """
     Ask Gemini to extract fields defined in the template’s extractionSchema.
@@ -414,15 +451,17 @@ async def _extract(
             text_body=raw_text,
             file_bytes=file_bytes,
             mime_type=mime_type or "application/octet-stream",
+            api_key=api_key,
         )
     elif raw_text:
         prompt += raw_text
-        return await gemini_service.generate_text(prompt)
+        return await gemini_service.generate_text(prompt, api_key=api_key)
     else:
         return await gemini_service.generate_with_file(
             prompt=prompt,
             file_bytes=file_bytes,  # type: ignore[arg-type]
             mime_type=mime_type or "application/octet-stream",
+            api_key=api_key,
         )
 
 

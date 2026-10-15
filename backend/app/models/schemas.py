@@ -110,6 +110,10 @@ class GeminiKeyUpdateResponse(BaseModel):
     geminiApiKeySet: bool = True
 
 
+class PlatformFallbackUpdate(BaseModel):
+    enabled: bool
+
+
 # ==============================================================================
 # USER & AUTH SCHEMAS
 # ==============================================================================
@@ -144,7 +148,7 @@ class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
     user: UserResponse
-    workspace: WorkspaceResponse
+    workspace: WorkspaceWithPlanResponse
 
 
 class TokenPayload(BaseModel):
