@@ -7,7 +7,54 @@ import { SkeletonRow } from '../components/ui/Skeleton'
 import { Drawer } from '../components/ui/Drawer'
 import { Button } from '../components/ui/Button'
 import toast from 'react-hot-toast'
+import { describeFailure, type FailureInfo } from '../lib/failure'
 import styles from './Logs.module.css'
+
+const FAILURE_BOX_STYLE = { background: 'var(--bg-error-subtle, rgba(239, 68, 68, 0.1))', border: '1px solid var(--border-error, #ef4444)', borderRadius: '8px', padding: '16px' } as const
+const FAILURE_BODY_STYLE = { fontSize: '13px', color: 'var(--text-color)', lineHeight: 1.5, opacity: 0.9 } as const
+
+function FailureDetails({ failure }: { failure: FailureInfo }) {
+  const title =
+    failure.kind === 'fields' ? 'Validation Engine Failed'
+    : failure.kind === 'message' ? failure.title
+    : 'Extraction Failed'
+
+  return (
+    <div style={FAILURE_BOX_STYLE}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px', color: 'var(--text-error, #ef4444)' }}>
+        <AlertCircle size={18} />
+        <strong style={{ fontSize: '14px' }}>{title}</strong>
+      </div>
+
+      {failure.kind === 'message' && (
+        <p style={{ ...FAILURE_BODY_STYLE, margin: 0, overflowWrap: 'anywhere' }}>{failure.message}</p>
+      )}
+
+      {failure.kind === 'fields' && (
+        <>
+          <p style={{ ...FAILURE_BODY_STYLE, marginBottom: '16px' }}>
+            The AI successfully extracted data, but it violated the strict rules of your template schema. Here is what needs fixing:
+          </p>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            {failure.issues.map((issue, i) => (
+              <div key={i} style={{ background: 'var(--bg-card)', padding: '10px 12px', borderRadius: '6px', fontSize: '13px', display: 'flex', gap: '8px', alignItems: 'flex-start' }}>
+                <span style={{ color: '#ef4444' }}>🔴</span>
+                <div>
+                  <strong style={{ display: 'block', marginBottom: '2px' }}>Field: <code style={{ background: 'var(--bg-subtle)', padding: '2px 4px', borderRadius: '4px', fontSize: '12px' }}>{issue.field}</code></strong>
+                  <span style={{ color: 'var(--text-muted)' }}>Issue: {issue.message}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+
+      {failure.kind === 'unknown' && (
+        <pre className={styles.json} style={{ margin: 0 }}>{JSON.stringify(failure.raw, null, 2)}</pre>
+      )}
+    </div>
+  )
+}
 
 const STATUS_OPTIONS: ExtractionStatus[] = ['SUCCESS', 'NEEDS_REVIEW', 'FAILED', 'UNMATCHED', 'PENDING', 'PROCESSING']
 const SOURCE_OPTIONS: Source[] = ['MANUAL', 'API', 'EMAIL', 'WEBHOOK']
@@ -342,27 +389,8 @@ export function Logs() {
                       </div>
                     )}
                   </div>
-                ) : details[expanded].status === 'FAILED' && details[expanded].validationErrors ? (
-                  <div style={{ background: 'var(--bg-error-subtle, rgba(239, 68, 68, 0.1))', border: '1px solid var(--border-error, #ef4444)', borderRadius: '8px', padding: '16px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px', color: 'var(--text-error, #ef4444)' }}>
-                      <AlertCircle size={18} />
-                      <strong style={{ fontSize: '14px' }}>Validation Engine Failed</strong>
-                    </div>
-                    <p style={{ fontSize: '13px', color: 'var(--text-color)', marginBottom: '16px', lineHeight: 1.5, opacity: 0.9 }}>
-                      The AI successfully extracted data, but it violated the strict rules of your template schema. Here is what needs fixing:
-                    </p>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                      {(Array.isArray(details[expanded].validationErrors) ? details[expanded].validationErrors : []).map((err: any, i) => (
-                        <div key={i} style={{ background: 'var(--bg-card)', padding: '10px 12px', borderRadius: '6px', fontSize: '13px', display: 'flex', gap: '8px', alignItems: 'flex-start' }}>
-                          <span style={{ color: '#ef4444' }}>🔴</span>
-                          <div>
-                            <strong style={{ display: 'block', marginBottom: '2px' }}>Field: <code style={{ background: 'var(--bg-subtle)', padding: '2px 4px', borderRadius: '4px', fontSize: '12px' }}>{err.field || 'unknown'}</code></strong>
-                            <span style={{ color: 'var(--text-muted)' }}>Issue: {err.message}</span>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
+                ) : details[expanded].status === 'FAILED' && describeFailure(details[expanded].validationErrors) ? (
+                  <FailureDetails failure={describeFailure(details[expanded].validationErrors)!} />
                 ) : details[expanded].status === 'UNMATCHED' ? (
                   <div style={{ background: 'var(--bg-warning-subtle, rgba(245, 158, 11, 0.1))', border: '1px solid var(--border-warning, #f59e0b)', borderRadius: '8px', padding: '16px' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px', color: 'var(--text-warning, #d97706)' }}>

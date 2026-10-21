@@ -41,5 +41,8 @@
 
 ### 📋 Phase 8: Product review fixes (2026-10-15 new-user walkthrough)
 Backlog tracked as GitHub issues, milestone "First-run experience": [#1–#13](https://github.com/ajaysajikumar8/Intelligent-Data-Extraction/issues). Labels: `bug`/`ux`/`product`/`tech-debt` + `p0`/`p1`/`p2`.
-- [ ] P0 blockers: #1 (Logs hide failure reason), #2 (first-run checklist), #14 (first-run access decision)
+- [x] #1 Logs/Submit now show the real failure reason (2026-10-21): `frontend/src/lib/failure.ts` `describeFailure()` normalises the 3 `validationErrors` shapes (`[{field,message}]`, `{error}`, `{pipeline_error}`). Verified in a real browser (Playwright, no-key workspace, light theme). Uncommitted, no frontend test runner yet.
+- [x] Submit toast now reflects status (SUCCESS / NEEDS_REVIEW / UNMATCHED / FAILED with real reason); verified in browser. Submit button disabled with no templates is correct (extraction needs a template) — only first-run guidance is missing → #2.
+- [ ] Found while verifying #1: Logs.tsx uses ~12 undefined CSS vars (`--bg-card`, `--text-color`… vs `--color-*` in tokens.css); React missing-`key` warning at Logs.tsx:125.
+- [ ] P0 blockers: #2 (first-run checklist), #14 (first-run access decision)
 - [ ] Private items (not in repo): pricing and billing, target customer and job, 3–5 user interviews, real extraction-quality test with a Gemini key on sample invoices

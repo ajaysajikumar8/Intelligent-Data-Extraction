@@ -7,6 +7,7 @@ import type { DocumentLogResponse, TemplateResponse } from '../lib/types'
 import { Button } from '../components/ui/Button'
 import { Textarea } from '../components/ui/Input'
 import { StatusBadge } from '../components/ui/Badge'
+import { describeFailure } from '../lib/failure'
 import styles from './Submit.module.css'
 
 import { TemplateSelect } from '../components/ui/TemplateSelect'
@@ -33,6 +34,7 @@ export function Submit() {
 
   const activeTemplates = tmplList.filter((t) => t.isActive)
   const selectedTemplate = activeTemplates.find((t) => t.id === selectedTemplateId)
+  const failure = describeFailure(result?.validationErrors)
   const matchedTemplate = result?.templateId ? tmplList.find((t) => t.id === result.templateId) : null
 
   const handleSubmit = async () => {
@@ -52,7 +54,19 @@ export function Submit() {
         templateId: selectedTemplateId || undefined,
       })
       setResult(res)
-      toast.success('Extraction complete!')
+      if (res.status === 'SUCCESS') {
+        toast.success('Extraction complete!')
+      } else if (res.status === 'NEEDS_REVIEW') {
+        toast('Extracted, but some fields need review.')
+      } else if (res.status === 'UNMATCHED') {
+        toast('No matching template found for this document.')
+      } else {
+        const reason = describeFailure(res.validationErrors)
+        toast.error(
+          reason?.kind === 'message' ? reason.message : 'Extraction failed. See the log for details.',
+          { duration: 6000 },
+        )
+      }
       setTimeout(() => {
         navigate('/logs')
       }, 700)
@@ -236,10 +250,19 @@ export function Submit() {
               </pre>
             ) : result.validationErrors ? (
               <div className={styles.errorBox}>
-                <p className={styles.errorHeader}>Validation / Pipeline Errors:</p>
-                <pre className={styles.jsonError}>
-                  {JSON.stringify(result.validationErrors, null, 2)}
-                </pre>
+                {failure?.kind === 'message' ? (
+                  <>
+                    <p className={styles.errorHeader}>{failure.title}</p>
+                    <p className={styles.resultMeta}>{failure.message}</p>
+                  </>
+                ) : (
+                  <>
+                    <p className={styles.errorHeader}>Validation / Pipeline Errors:</p>
+                    <pre className={styles.jsonError}>
+                      {JSON.stringify(result.validationErrors, null, 2)}
+                    </pre>
+                  </>
+                )}
               </div>
             ) : (
               <p className={styles.resultMeta}>No structured data extracted.</p>
