@@ -57,6 +57,17 @@ graph TD
     DB --> Dashboard
 ```
 
+## Asynchronous Processing
+
+Extraction takes 10–60 s and depends on a third-party API, so it never runs inside the HTTP request (see [ADR-006](adr/006-async-extraction-queue.md)).
+
+1. `POST /ingest` (and every inbound adapter) creates a `DocumentLog` in `PENDING`, enqueues the job, and returns **`202 Accepted`** immediately.
+2. An in-process queue (`extraction_queue.py`) runs the pipeline with bounded concurrency, a per-job timeout and a bounded backlog (`503` when full).
+3. Transient Gemini errors (5xx, network) are retried with exponential backoff. Any failure is classified (`failures.py`) into a stable `code` plus a user-safe message, so raw provider errors are never stored or shown.
+4. Clients read the result from `GET /logs/{id}` (the dashboard polls it) or receive it through the outbound webhook, which fires on **every** terminal status.
+
+The queue is in-process: a hard crash loses in-flight jobs, which a startup sweep marks `INTERRUPTED`. ADR-006 describes the graduation path to a durable worker.
+
 ## Email Ingestion — Two Modes
 
 Email data can enter the pipeline in two distinct ways:

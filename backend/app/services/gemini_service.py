@@ -26,6 +26,10 @@ from app.core.config import get_settings
 
 logger = logging.getLogger("app.services.gemini")
 
+
+class EmptyGeminiResponse(RuntimeError):
+    """Gemini returned no text, typically because the request was blocked by safety filters."""
+
 # ---------------------------------------------------------------------------
 # Generation config — applied to all requests
 # ---------------------------------------------------------------------------
@@ -75,7 +79,7 @@ async def generate_text(prompt: str, api_key: str | None = None) -> str:
         Gemini's response as a stripped string.
 
     Raises:
-        RuntimeError: If Gemini returns an empty or blocked response.
+        EmptyGeminiResponse: If Gemini returns an empty or blocked response.
     """
     client = _get_client(api_key)
     logger.debug("Sending text prompt to Gemini (%d chars)", len(prompt))
@@ -87,7 +91,7 @@ async def generate_text(prompt: str, api_key: str | None = None) -> str:
     )
 
     if not response.text:
-        raise RuntimeError(
+        raise EmptyGeminiResponse(
             "Gemini returned an empty response. "
             "The request may have been blocked by safety filters."
         )
@@ -131,7 +135,7 @@ async def generate_with_file(
     )
 
     if not response.text:
-        raise RuntimeError(
+        raise EmptyGeminiResponse(
             "Gemini returned an empty response for the file input. "
             "The request may have been blocked by safety filters."
         )
@@ -179,7 +183,7 @@ async def generate_with_text_and_file(
     )
 
     if not response.text:
-        raise RuntimeError(
+        raise EmptyGeminiResponse(
             "Gemini returned an empty response for the hybrid input. "
             "The request may have been blocked by safety filters."
         )

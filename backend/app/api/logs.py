@@ -23,7 +23,7 @@ from typing import Any
 from pydantic import BaseModel
 from app.core.auth import get_current_workspace
 from app.core.db import db
-from app.models.schemas import DocumentLogDetailResponse, WebhookDeliveryResponse
+from app.models.schemas import DocumentLogDetailResponse, DocumentLogResponse, WebhookDeliveryResponse
 from app.services import webhook_dispatcher
 from app.services.extraction_pipeline import validate_correction
 
@@ -64,21 +64,9 @@ async def get_document_audit_log(
         for d in (doc_log.webhookDeliveries or [])
     ]
 
+    # Build from the model (not field by field) so new columns can never be silently dropped.
     return DocumentLogDetailResponse(
-        id=doc_log.id,
-        workspaceId=doc_log.workspaceId,
-        templateId=doc_log.templateId,
-        userId=doc_log.userId,
-        source=doc_log.source,  # type: ignore[arg-type]
-        status=doc_log.status,  # type: ignore[arg-type]
-        rawInput=doc_log.rawInput,
-        rawInputUrl=doc_log.rawInputUrl,
-        fileName=doc_log.fileName,
-        mimeType=doc_log.mimeType,
-        extractedJson=doc_log.extractedJson,
-        validationErrors=doc_log.validationErrors,
-        processingMs=doc_log.processingMs,
-        createdAt=doc_log.createdAt,
+        **DocumentLogResponse.model_validate(doc_log).model_dump(),
         webhookDeliveries=deliveries,
     )
 
@@ -164,19 +152,6 @@ async def correct_document_extraction(
     ]
 
     return DocumentLogDetailResponse(
-        id=updated_log.id, # type: ignore[union-attr]
-        workspaceId=updated_log.workspaceId, # type: ignore[union-attr]
-        templateId=updated_log.templateId, # type: ignore[union-attr]
-        userId=updated_log.userId, # type: ignore[union-attr]
-        source=updated_log.source,  # type: ignore[arg-type]
-        status=updated_log.status,  # type: ignore[arg-type]
-        rawInput=updated_log.rawInput, # type: ignore[union-attr]
-        rawInputUrl=updated_log.rawInputUrl, # type: ignore[union-attr]
-        fileName=updated_log.fileName, # type: ignore[union-attr]
-        mimeType=updated_log.mimeType, # type: ignore[union-attr]
-        extractedJson=updated_log.extractedJson, # type: ignore[union-attr]
-        validationErrors=updated_log.validationErrors, # type: ignore[union-attr]
-        processingMs=updated_log.processingMs, # type: ignore[union-attr]
-        createdAt=updated_log.createdAt, # type: ignore[union-attr]
+        **DocumentLogResponse.model_validate(updated_log).model_dump(),
         webhookDeliveries=deliveries,
     )

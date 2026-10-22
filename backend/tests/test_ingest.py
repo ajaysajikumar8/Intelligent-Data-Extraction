@@ -17,6 +17,7 @@ from httpx import ASGITransport, AsyncClient
 
 from app.core.db import db
 from app.main import app
+from app.services import extraction_queue
 
 
 # ---------------------------------------------------------------------------
@@ -72,6 +73,23 @@ async def _signup_and_create_template(client: AsyncClient) -> tuple[str, str, st
     return token, api_key, workspace_id, user_id, template_id
 
 
+async def _ingest_and_wait(client: AsyncClient, headers: dict, form: dict) -> dict:
+    """
+    POST to the ingest endpoint, assert the 202/PENDING contract, wait for the
+    background job to finish, and return the final DocumentLog JSON.
+
+    Must be called *inside* any `patch(...)` block: the pipeline runs after the
+    response is returned, so the patch has to outlive the request.
+    """
+    res = await client.post("/api/v1/ingest/", data=form, headers=headers)
+    assert res.status_code == 202, res.text
+    assert res.json()["status"] == "PENDING"
+    await extraction_queue.wait_idle()
+    final = await client.get(f"/api/v1/logs/{res.json()['id']}", headers=headers)
+    assert final.status_code == 200, final.text
+    return final.json()
+
+
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
@@ -102,14 +120,12 @@ async def test_ingest_text_success():
             "app.services.gemini_service.generate_text",
             new=AsyncMock(side_effect=[template_id, extracted_payload]),
         ):
-            res = await client.post(
-                "/api/v1/ingest/",
-                data={"rawInput": "Please process this invoice from Acme Corp, INV-2024-001, total $1234.56"},
-                headers=headers,
+            data = await _ingest_and_wait(
+                client,
+                headers,
+                {"rawInput": "Please process this invoice from Acme Corp, INV-2024-001, total $1234.56"},
             )
 
-        assert res.status_code == 201, res.text
-        data = res.json()
         assert data["status"] == "SUCCESS"
         assert data["workspaceId"] == workspace_id
         assert data["templateId"] == template_id
@@ -145,14 +161,10 @@ async def test_ingest_text_unmatched():
             "app.services.gemini_service.generate_text",
             new=AsyncMock(return_value="UNMATCHED"),
         ):
-            res = await client.post(
-                "/api/v1/ingest/",
-                data={"rawInput": "This is an unrecognisable document."},
-                headers=headers,
+            data = await _ingest_and_wait(
+                client, headers, {"rawInput": "This is an unrecognisable document."}
             )
 
-        assert res.status_code == 201, res.text
-        data = res.json()
         assert data["status"] == "UNMATCHED"
         assert data["templateId"] is None
         assert data["extractedJson"] is None
@@ -181,14 +193,8 @@ async def test_ingest_text_validation_failure():
             "app.services.gemini_service.generate_text",
             new=AsyncMock(side_effect=[template_id, "this is not valid json {{{"]),
         ):
-            res = await client.post(
-                "/api/v1/ingest/",
-                data={"rawInput": "Invoice from Acme Corp"},
-                headers=headers,
-            )
+            data = await _ingest_and_wait(client, headers, {"rawInput": "Invoice from Acme Corp"})
 
-        assert res.status_code == 201, res.text
-        data = res.json()
         assert data["status"] == "FAILED"
         assert data["validationErrors"] is not None
 
@@ -247,16 +253,15 @@ async def test_ingest_blocked_without_key_or_fallback():
         user_id = data["user"]["id"]
         assert data["workspace"]["allowPlatformFallback"] is False
 
-        res = await client.post(
-            "/api/v1/ingest/",
-            data={"rawInput": "Invoice from Acme Corp, total $100."},
-            headers={"Authorization": f"Bearer {token}"},
+        data = await _ingest_and_wait(
+            client,
+            {"Authorization": f"Bearer {token}"},
+            {"rawInput": "Invoice from Acme Corp, total $100."},
         )
 
-        assert res.status_code == 201, res.text
-        data = res.json()
         assert data["status"] == "FAILED"
         assert "No AI key configured" in data["validationErrors"]["error"]
+        assert data["validationErrors"]["code"] == "NO_AI_KEY"
 
         # Cleanup
         await db.documentlog.delete(where={"id": data["id"]})

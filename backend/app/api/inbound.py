@@ -45,7 +45,6 @@ extraction to the pipeline asynchronously — this prevents third-party services
 from timing out while Gemini processes the document.
 """
 
-import asyncio
 import logging
 from typing import Optional
 
@@ -54,7 +53,7 @@ from fastapi import APIRouter, File, Form, HTTPException, UploadFile, status
 from app.core.db import db
 from app.core.utils import validate_and_read_file
 from app.models.schemas import InboundResponse, Source
-from app.services import extraction_pipeline
+from app.services import extraction_queue
 
 logger = logging.getLogger("app.api.inbound")
 router = APIRouter()
@@ -123,11 +122,21 @@ async def _run_pipeline(
     template_id: str | None,
 ) -> InboundResponse:
     """
-    Create a DocumentLog record and kick off the extraction pipeline.
+    Create a DocumentLog record and enqueue it for extraction.
     Called by every inbound adapter after translating the payload.
     """
     has_text = bool(raw_text and raw_text.strip())
     has_file = file_bytes is not None
+
+    # Reject before creating a log row: queued jobs hold uploaded bytes in memory.
+    try:
+        extraction_queue.ensure_capacity()
+    except extraction_queue.QueueFullError:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="The extraction service is busy right now. Please retry shortly.",
+            headers={"Retry-After": "30"},
+        )
 
     create_data: dict = {
         "workspace": {"connect": {"id": workspace.id}},
@@ -142,16 +151,14 @@ async def _run_pipeline(
 
     doc_log = await db.documentlog.create(data=create_data)  # type: ignore[arg-type]
 
-    # Fire pipeline as asyncio background task — respond immediately
-    asyncio.create_task(
-        extraction_pipeline.run(
-            doc_log_id=doc_log.id,
-            workspace_id=workspace.id,
-            raw_text=raw_text.strip() if has_text else None,
-            file_bytes=file_bytes,
-            mime_type=mime_type,
-            target_template_id=template_id,
-        )
+    # Shared queue also resolves the workspace's BYOAK key / fallback flag.
+    extraction_queue.enqueue(
+        doc_log_id=doc_log.id,
+        workspace=workspace,
+        raw_text=raw_text.strip() if has_text else None,
+        file_bytes=file_bytes,
+        mime_type=mime_type,
+        template_id=template_id,
     )
 
     return InboundResponse(

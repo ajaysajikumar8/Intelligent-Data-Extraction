@@ -38,6 +38,15 @@ class Settings(BaseSettings):
     GEMINI_MODEL: str = "gemini-3.8-flash"
 
     # ------------------------------------------------------------------ #
+    # Extraction queue (in-process — see docs/adr/006-async-extraction-queue.md)
+    # Limits are per process. Queued jobs hold uploaded file bytes in memory,
+    # so the backlog is capped: roughly MAX_BACKLOG × the 20 MB upload limit.
+    # ------------------------------------------------------------------ #
+    EXTRACTION_MAX_CONCURRENCY: int = 4
+    EXTRACTION_MAX_BACKLOG: int = 50
+    EXTRACTION_JOB_TIMEOUT_SECONDS: int = 450
+
+    # ------------------------------------------------------------------ #
     # Encryption — Fernet key for encrypting BYOAK Gemini keys at rest
     # Generate with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
     # If unset, keys are stored as plaintext (acceptable for local dev only).

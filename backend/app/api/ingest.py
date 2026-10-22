@@ -3,7 +3,10 @@ ingest.py — Document ingestion endpoint.
 
 Routes
 ------
-  POST /api/v1/ingest   — Single unified ingestion route.
+  POST /api/v1/ingest   — Single unified ingestion route. Responds 202 Accepted with the
+                          DocumentLog in PENDING; extraction runs in the background queue
+                          (see docs/adr/006). Read the result from GET /api/v1/logs/{id}
+                          or the outbound webhook.
                           Accepts any combination of:
                             • rawInput  (text)   — email body, pasted text, cover letter
                             • file      (upload) — PDF, PNG, JPEG, or WebP attachment
@@ -30,10 +33,9 @@ from prisma.models import User, Workspace
 
 from app.core.auth import get_current_user, get_current_workspace
 from app.core.db import db
-from app.core.encryption import decrypt
 from app.core.utils import validate_and_read_file
 from app.models.schemas import DocumentLogResponse, ExtractionStatus, Source
-from app.services import extraction_pipeline
+from app.services import extraction_queue
 
 logger = logging.getLogger("app.api.ingest")
 router = APIRouter()
@@ -110,7 +112,7 @@ async def list_document_logs(
 # POST /ingest — Single unified ingestion endpoint
 # ---------------------------------------------------------------------------
 
-@router.post("/", response_model=DocumentLogResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/", response_model=DocumentLogResponse, status_code=status.HTTP_202_ACCEPTED)
 async def ingest(
     raw_input: Optional[str] = Form(None, alias="rawInput"),
     file: Optional[UploadFile] = File(None),
@@ -121,6 +123,10 @@ async def ingest(
 ) -> DocumentLogResponse:
     """
     Unified document ingestion endpoint.
+
+    Returns 202 immediately with the DocumentLog in PENDING status. The
+    extraction pipeline runs in the background queue; poll GET /logs/{id} (or
+    listen for the outbound webhook) for the final status.
 
     Accepts any combination of:
       • rawInput (text)   — email body, cover letter, pasted text
@@ -156,6 +162,16 @@ async def ingest(
 
     await _check_quota(workspace)
 
+    # Reject before creating a log row: queued jobs hold uploaded bytes in memory.
+    try:
+        extraction_queue.ensure_capacity()
+    except extraction_queue.QueueFullError:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="The extraction service is busy right now. Please try again in a minute.",
+            headers={"Retry-After": "30"},
+        )
+
     # Determine mode label for logging
     if has_text and has_file:
         mode = "hybrid"
@@ -188,17 +204,13 @@ async def ingest(
         workspace.id,
     )
 
-    custom_api_key = decrypt(workspace.geminiApiKey) if workspace.geminiApiKey else None
-
-    final_log = await extraction_pipeline.run(
+    extraction_queue.enqueue(
         doc_log_id=doc_log.id,
-        workspace_id=workspace.id,
+        workspace=workspace,
         raw_text=raw_input.strip() if has_text else None,
         file_bytes=file_bytes,
         mime_type=content_type,
-        target_template_id=template_id,
-        custom_api_key=custom_api_key,
-        allow_platform_fallback=workspace.allowPlatformFallback,
+        template_id=template_id,
     )
 
-    return DocumentLogResponse.model_validate(final_log)
+    return DocumentLogResponse.model_validate(doc_log)

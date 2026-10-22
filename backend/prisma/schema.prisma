@@ -180,6 +180,9 @@ model DocumentLog {
   confidenceScores Json?
   validationErrors Json?
   processingMs     Int?
+  // Live progress while PENDING/PROCESSING (stage, attempt, retrying…); null once terminal.
+  // Written by the extraction pipeline, read by the dashboard — see docs/adr/006.
+  progress         Json?
   createdAt        DateTime         @default(now())
 
   workspace         Workspace         @relation(fields: [workspaceId], references: [id])

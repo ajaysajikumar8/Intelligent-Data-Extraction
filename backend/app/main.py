@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api import api_router
 from app.core.config import Settings, get_settings
 from app.core.db import db, connect_db, disconnect_db
+from app.services import extraction_queue
 
 logger = logging.getLogger("app.main")
 
@@ -15,7 +16,7 @@ logger = logging.getLogger("app.main")
 async def lifespan(application: FastAPI) -> AsyncGenerator[None, None]:
     """
     FastAPI Lifespan Context Manager.
-    Handles startup (DB connect & pre-flight seed check) and shutdown (DB disconnect) tasks.
+    Handles startup (DB connect, seed check, orphaned-job recovery) and shutdown (drain extraction queue, DB disconnect) tasks.
     """
     await connect_db()
 
@@ -30,7 +31,13 @@ async def lifespan(application: FastAPI) -> AsyncGenerator[None, None]:
         raise RuntimeError(msg)
 
     logger.info("Pre-flight database seed check passed (Free plan ID: %s).", free_plan.id)
+
+    # Documents left in flight by a crashed process would otherwise stay PENDING forever.
+    await extraction_queue.recover_orphans()
+
     yield
+
+    await extraction_queue.shutdown()
     await disconnect_db()
 
 

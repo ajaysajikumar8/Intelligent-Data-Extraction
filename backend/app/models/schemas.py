@@ -252,6 +252,7 @@ class DocumentLogResponse(BaseModel):
     confidenceScores: dict[str, Any] | None = None
     validationErrors: list[Any] | dict[str, Any] | None = None
     processingMs: int | None = None
+    progress: dict[str, Any] | None = None
     createdAt: datetime
 
 

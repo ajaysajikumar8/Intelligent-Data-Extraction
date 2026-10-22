@@ -27,6 +27,7 @@ finally landing on SUCCESS, FAILED, or UNMATCHED.
 import asyncio
 import json
 import logging
+import random
 import time
 from typing import Any, Awaitable, Callable, TypeVar
 
@@ -35,10 +36,20 @@ from prisma.models import DocumentLog, Template
 from prisma.fields import Json
 
 from app.core.db import db
+from app.services import failures
 from app.services import gemini_service
 from app.services import webhook_dispatcher
 
 logger = logging.getLogger("app.services.pipeline")
+
+# Transient provider errors (5xx, network, per-call timeout) are retried with
+# exponential backoff plus jitter before the document is failed. Provider overloads
+# usually clear within seconds, so back off a little (≈5s, then ≈10s) rather than
+# hammering. A single hung call is cut off after _CALL_TIMEOUT_S and counts as transient.
+# Worst case per stage ≈ 3×60s + ~15s waiting; two stages fit inside the 450s job timeout.
+_MAX_ATTEMPTS = 3
+_RETRY_BASE_DELAY_S = 5.0
+_CALL_TIMEOUT_S = 60.0
 
 # ---------------------------------------------------------------------------
 # Type alias for the dynamic Pydantic field map
@@ -100,30 +111,24 @@ async def run(
 
     if not custom_api_key and not allow_platform_fallback:
         # No custom key and platform fallback is off — nothing to use
-        processing_ms = int((time.monotonic() - start_ms) * 1000)
         logger.warning(
             "[%s] No API key configured and platform fallback disabled — failing",
             doc_log_id,
         )
-        return await db.documentlog.update(
-            where={"id": doc_log_id},
-            data={
-                "status": "FAILED",
-                "processingMs": processing_ms,
-                "validationErrors": Json({  # type: ignore[arg-type]
-                    "error": (
-                        "No AI key configured. Add your Gemini API key in "
-                        "Settings → AI Integration, or enable Platform Key "
-                        "Fallback on a paid plan."
-                    )
-                }),
-            },
+        return await _finish(
+            doc_log_id,
+            start_ms,
+            "FAILED",
+            validationErrors=Json(failures.failure(failures.FailureCode.NO_AI_KEY).to_json()),  # type: ignore[arg-type]
         )
 
-    # Mark as PROCESSING
+    # Mark as PROCESSING (stage 1 is skipped when the caller picked a template)
     await db.documentlog.update(
         where={"id": doc_log_id},
-        data={"status": "PROCESSING"},
+        data={
+            "status": "PROCESSING",
+            "progress": Json(_progress("EXTRACTING" if target_template_id else "CLASSIFYING")),  # type: ignore[arg-type]
+        },
     )
 
     try:
@@ -140,7 +145,7 @@ async def run(
                     doc_log_id,
                     target_template_id,
                 )
-                return await _finalize_and_dispatch(doc_log_id, start_ms, "UNMATCHED")
+                return await _finish(doc_log_id, start_ms, "UNMATCHED")
         else:
             # Fetch active templates for this workspace
             templates = await db.template.find_many(
@@ -151,13 +156,14 @@ async def run(
                 logger.info(
                     "[%s] No active templates found — marking UNMATCHED", doc_log_id
                 )
-                return await _finalize(doc_log_id, start_ms, "UNMATCHED")
+                return await _finish(doc_log_id, start_ms, "UNMATCHED")
 
             # ------------------------------------------------------------------ #
             # Stage 1: Intent Classification (Auto-detect)
             # ------------------------------------------------------------------ #
             matched_template = await _call_with_fallback(
                 doc_log_id=doc_log_id,
+                stage="CLASSIFYING",
                 custom_api_key=custom_api_key,
                 allow_platform_fallback=allow_platform_fallback,
                 fn=lambda key: _classify(
@@ -172,7 +178,7 @@ async def run(
 
             if matched_template is None:
                 logger.info("[%s] No template matched — marking UNMATCHED", doc_log_id)
-                return await _finalize(doc_log_id, start_ms, "UNMATCHED")
+                return await _finish(doc_log_id, start_ms, "UNMATCHED")
 
         logger.info(
             "[%s] Classified as template '%s' (%s)",
@@ -190,8 +196,10 @@ async def run(
         # ------------------------------------------------------------------ #
         # Stage 2: Schema Extraction
         # ------------------------------------------------------------------ #
+        await _set_progress(doc_log_id, "EXTRACTING")
         raw_json_str = await _call_with_fallback(
             doc_log_id=doc_log_id,
+            stage="EXTRACTING",
             custom_api_key=custom_api_key,
             allow_platform_fallback=allow_platform_fallback,
             fn=lambda key: _extract(
@@ -217,17 +225,19 @@ async def run(
             logger.warning(
                 "[%s] Validation failed: %s", doc_log_id, validation_errors
             )
-            processing_ms = int((time.monotonic() - start_ms) * 1000)
-            final_log = await db.documentlog.update(
-                where={"id": doc_log_id},
-                data={
-                    "status": "FAILED",
-                    "validationErrors": Json(validation_errors),  # type: ignore[arg-type]
-                    "processingMs": processing_ms,
-                },
+            # Field-level issues are actionable (the user can fix the template or correct the
+            # data). Errors with no `field` mean the AI's output could not be parsed at all,
+            # which is not the user's doing: show a friendly message, not parser output.
+            if any("field" not in e for e in validation_errors):
+                payload: Any = failures.failure(failures.FailureCode.BAD_AI_OUTPUT).to_json()
+            else:
+                payload = validation_errors
+            return await _finish(
+                doc_log_id,
+                start_ms,
+                "FAILED",
+                validationErrors=Json(payload),  # type: ignore[arg-type]
             )
-            asyncio.create_task(webhook_dispatcher.dispatch(final_log))
-            return final_log
 
         # Check confidence scores to determine status
         final_status = "SUCCESS"
@@ -237,39 +247,55 @@ async def run(
                 final_status = "NEEDS_REVIEW"
 
         logger.info("[%s] Extraction complete, status: %s", doc_log_id, final_status)
-        processing_ms = int((time.monotonic() - start_ms) * 1000)
-        final_log = await db.documentlog.update(
-            where={"id": doc_log_id},
-            data={
-                "status": final_status,
-                "extractedJson": Json(extracted_data),  # type: ignore[arg-type]
-                "confidenceScores": Json(confidence_scores if confidence_scores else None),  # type: ignore[arg-type]
-                "processingMs": processing_ms,
-            },
+        return await _finish(
+            doc_log_id,
+            start_ms,
+            final_status,
+            extractedJson=Json(extracted_data),  # type: ignore[arg-type]
+            confidenceScores=Json(confidence_scores if confidence_scores else None),  # type: ignore[arg-type]
         )
-        asyncio.create_task(webhook_dispatcher.dispatch(final_log))
-        return final_log
 
     except Exception as exc:  # noqa: BLE001
+        # The raw exception stays in the server log; the user only sees a classified message.
         logger.exception("[%s] Pipeline error: %s", doc_log_id, exc)
-        processing_ms = int((time.monotonic() - start_ms) * 1000)
-        final_log = await db.documentlog.update(
-            where={"id": doc_log_id},
-            data={
-                "status": "FAILED",
-                "validationErrors": Json({"pipeline_error": str(exc)}),  # type: ignore[arg-type]
-                "processingMs": processing_ms,
-            },
+        failure = failures.classify(exc)
+        return await _finish(
+            doc_log_id,
+            start_ms,
+            "FAILED",
+            validationErrors=Json(failure.to_json()),  # type: ignore[arg-type]
         )
-        asyncio.create_task(webhook_dispatcher.dispatch(final_log))
-        return final_log
 
 
 T = TypeVar("T")
 
 
+def _progress(stage: str, attempt: int = 1, retry_reason: str | None = None) -> dict[str, Any]:
+    """Live progress shown to the user while a document is in flight."""
+    return {
+        "stage": stage,
+        "attempt": attempt,
+        "maxAttempts": _MAX_ATTEMPTS,
+        "retryReason": retry_reason,  # a FailureCode while waiting to retry, else None
+    }
+
+
+async def _set_progress(
+    doc_log_id: str, stage: str, attempt: int = 1, retry_reason: str | None = None
+) -> None:
+    """Best-effort: progress is informational and must never fail a job."""
+    try:
+        await db.documentlog.update(
+            where={"id": doc_log_id},
+            data={"progress": Json(_progress(stage, attempt, retry_reason))},  # type: ignore[arg-type]
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[%s] Could not record progress: %s", doc_log_id, exc)
+
+
 async def _call_with_fallback(
     doc_log_id: str,
+    stage: str,
     custom_api_key: str | None,
     allow_platform_fallback: bool,
     fn: Callable[[str | None], Awaitable[T]],
@@ -284,18 +310,47 @@ async def _call_with_fallback(
     with a clear message instead of silently burning platform budget.
     """
     if not custom_api_key:
-        return await fn(None)  # No custom key — caller already verified fallback is allowed.
+        # No custom key — caller already verified fallback is allowed.
+        return await _with_retries(doc_log_id, stage, lambda: fn(None))
 
     try:
-        return await fn(custom_api_key)
+        return await _with_retries(doc_log_id, stage, lambda: fn(custom_api_key))
     except Exception as exc:
         if allow_platform_fallback and gemini_service.is_quota_error(exc):
             logger.warning(
                 "[%s] Custom Gemini key quota exhausted — falling back to platform key",
                 doc_log_id,
             )
-            return await fn(None)
+            return await _with_retries(doc_log_id, stage, lambda: fn(None))
         raise
+
+
+async def _with_retries(doc_log_id: str, stage: str, call: Callable[[], Awaitable[T]]) -> T:
+    """
+    Run `call`, retrying transient provider errors (5xx / network / per-call
+    timeout) with exponential backoff and jitter, and recording each retry in the
+    document's live progress. Non-transient errors — including quota (429),
+    which `_call_with_fallback` handles by switching keys — propagate immediately.
+    """
+    for attempt in range(1, _MAX_ATTEMPTS + 1):
+        try:
+            return await asyncio.wait_for(call(), timeout=_CALL_TIMEOUT_S)
+        except Exception as exc:
+            if attempt == _MAX_ATTEMPTS or not failures.is_transient(exc):
+                raise
+            delay = _RETRY_BASE_DELAY_S * 2 ** (attempt - 1)
+            delay += random.uniform(0, delay * 0.25)  # jitter avoids synchronised retries
+            await _set_progress(doc_log_id, stage, attempt + 1, failures.classify(exc).code.value)
+            logger.warning(
+                "[%s] Transient AI error (attempt %d/%d), retrying in %.1fs: %s",
+                doc_log_id,
+                attempt,
+                _MAX_ATTEMPTS,
+                delay,
+                exc,
+            )
+            await asyncio.sleep(delay)
+    raise AssertionError("unreachable")  # pragma: no cover
 
 
 # ---------------------------------------------------------------------------
@@ -572,20 +627,45 @@ def validate_correction(template: Template | None, corrected_data: dict[str, Any
 # Helper — finalize DocumentLog with no extraction data
 # ---------------------------------------------------------------------------
 
-async def _finalize_and_dispatch(
+async def _finish(
     doc_log_id: str,
     start_ms: float,
     status: str,
+    **data: Any,
 ) -> DocumentLog:
-    """Update final status, fire outbound webhook dispatch, and return the log."""
-    processing_ms = int((time.monotonic() - start_ms) * 1000)
+    """
+    Single exit point for every terminal state: persist the final status and
+    result fields, then fire the outbound webhook dispatch.
+    """
     final_log = await db.documentlog.update(
         where={"id": doc_log_id},
-        data={"status": status, "processingMs": processing_ms},
+        data={
+            "status": status,
+            "processingMs": int((time.monotonic() - start_ms) * 1000),
+            "progress": Json(None),  # terminal: nothing left in flight  # type: ignore[arg-type]
+            **data,
+        },  # type: ignore[arg-type]
     )
     asyncio.create_task(webhook_dispatcher.dispatch(final_log))
     return final_log
 
 
-# Keep _finalize as an alias for legacy call-sites within the pipeline
-_finalize = _finalize_and_dispatch
+async def fail_document(doc_log_id: str, failure: failures.Failure) -> None:
+    """
+    Fail a document from outside the pipeline (queue timeout / interruption).
+
+    Only touches rows that are still in flight so a document that already
+    finished is never overwritten.
+    """
+    updated = await db.documentlog.update_many(
+        where={"id": doc_log_id, "status": {"in": ["PENDING", "PROCESSING"]}},  # type: ignore[arg-type]
+        data={
+            "status": "FAILED",
+            "validationErrors": Json(failure.to_json()),  # type: ignore[arg-type]
+            "progress": Json(None),  # type: ignore[arg-type]
+        },
+    )
+    if updated:
+        final_log = await db.documentlog.find_unique(where={"id": doc_log_id})
+        if final_log:
+            asyncio.create_task(webhook_dispatcher.dispatch(final_log))
