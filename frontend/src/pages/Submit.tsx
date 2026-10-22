@@ -1,19 +1,57 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
-import { AlertTriangle, Check, Copy, ExternalLink, FileUp, GitMerge, Plus, Send, Sparkles, Upload, X } from 'lucide-react'
+import { Link } from 'react-router-dom'
+import { AlertTriangle, Check, Copy, Download, ExternalLink, FileUp, GitMerge, Plus, Send, Sparkles, Upload, X } from 'lucide-react'
 import toast from 'react-hot-toast'
-import { ingest, templates } from '../lib/api'
+import { ingest, logs, templates } from '../lib/api'
 import type { DocumentLogResponse, TemplateResponse } from '../lib/types'
 import { Button } from '../components/ui/Button'
 import { Textarea } from '../components/ui/Input'
 import { StatusBadge } from '../components/ui/Badge'
 import { describeFailure } from '../lib/failure'
+import { isInFlight } from '../lib/status'
+import { useDocumentPolling } from '../hooks/useDocumentPolling'
+import { ProgressPanel } from '../components/ui/ProgressPanel'
+import { FailureDetails } from '../components/ui/FailureDetails'
+import { exportLogsAsCsv, exportLogsAsJson } from '../lib/export'
 import styles from './Submit.module.css'
 
 import { TemplateSelect } from '../components/ui/TemplateSelect'
 
+/** Lets the page pick the in-flight extraction back up after a reload or navigating away. */
+const LAST_SUBMISSION_KEY = 'ide:last-submission'
+
+function rememberSubmission(id: string | null) {
+  try {
+    if (id) sessionStorage.setItem(LAST_SUBMISSION_KEY, id)
+    else sessionStorage.removeItem(LAST_SUBMISSION_KEY)
+  } catch {
+    // Storage unavailable (private mode, quota): resuming is a convenience, not a requirement.
+  }
+}
+
+/** One toast per finished extraction, matched to its final status. */
+function announceResult(res: DocumentLogResponse) {
+  switch (res.status) {
+    case 'SUCCESS':
+      toast.success('Extraction complete!')
+      break
+    case 'NEEDS_REVIEW':
+      toast('Extracted, but some fields need review.')
+      break
+    case 'UNMATCHED':
+      toast('No matching template found for this document.')
+      break
+    default: {
+      const reason = describeFailure(res.validationErrors)
+      toast.error(
+        reason?.kind === 'message' ? reason.message : 'Extraction failed. See the log for details.',
+        { duration: 6000 },
+      )
+    }
+  }
+}
+
 export function Submit() {
-  const navigate = useNavigate()
   const [tmplList, setTmplList] = useState<TemplateResponse[]>([])
   const [isLoadingTemplates, setIsLoadingTemplates] = useState(true)
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>('')
@@ -21,9 +59,16 @@ export function Submit() {
   const [file, setFile] = useState<File | null>(null)
   const [isDragging, setIsDragging] = useState(false)
   const [loading, setLoading] = useState(false)
-  const [result, setResult] = useState<DocumentLogResponse | null>(null)
+  // `submitted` is the PENDING log returned by POST /ingest; the queue then runs
+  // the extraction in the background and `useDocumentPolling` follows it to a final status.
+  const [submitted, setSubmitted] = useState<DocumentLogResponse | null>(null)
+  const { log: polled, timedOut } = useDocumentPolling(submitted?.id ?? null)
+  const result = polled ?? submitted
+  const stillRunning = result !== null && isInFlight(result.status)
+  const isProcessing = stillRunning && !timedOut
   const [copied, setCopied] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
+  const announcedId = useRef<string | null>(null)
 
   useEffect(() => {
     templates.list()
@@ -32,9 +77,26 @@ export function Submit() {
       .finally(() => setIsLoadingTemplates(false))
   }, [])
 
+  // Resume an extraction that is still running (reload, or came back from another page).
+  useEffect(() => {
+    let id: string | null = null
+    try { id = sessionStorage.getItem(LAST_SUBMISSION_KEY) } catch { /* ignore */ }
+    if (!id) return
+    logs.get(id)
+      .then((log) => (isInFlight(log.status) ? setSubmitted(log) : rememberSubmission(null)))
+      .catch(() => rememberSubmission(null))
+  }, [])
+
+  useEffect(() => {
+    if (!result || isInFlight(result.status) || announcedId.current === result.id) return
+    announcedId.current = result.id
+    announceResult(result)
+  }, [result])
+
   const activeTemplates = tmplList.filter((t) => t.isActive)
   const selectedTemplate = activeTemplates.find((t) => t.id === selectedTemplateId)
   const failure = describeFailure(result?.validationErrors)
+  const exportName = `extraction_${result?.id.slice(0, 8) ?? ''}`
   const matchedTemplate = result?.templateId ? tmplList.find((t) => t.id === result.templateId) : null
 
   const handleSubmit = async () => {
@@ -46,30 +108,15 @@ export function Submit() {
       return
     }
 
-    setLoading(true); setResult(null); setCopied(false)
+    setLoading(true); setSubmitted(null); setCopied(false)
     try {
       const res = await ingest.submit({
         rawInput: useText || undefined,
         file: useFile || undefined,
         templateId: selectedTemplateId || undefined,
       })
-      setResult(res)
-      if (res.status === 'SUCCESS') {
-        toast.success('Extraction complete!')
-      } else if (res.status === 'NEEDS_REVIEW') {
-        toast('Extracted, but some fields need review.')
-      } else if (res.status === 'UNMATCHED') {
-        toast('No matching template found for this document.')
-      } else {
-        const reason = describeFailure(res.validationErrors)
-        toast.error(
-          reason?.kind === 'message' ? reason.message : 'Extraction failed. See the log for details.',
-          { duration: 6000 },
-        )
-      }
-      setTimeout(() => {
-        navigate('/logs')
-      }, 700)
+      setSubmitted(res)
+      rememberSubmission(res.id)
     } catch (e: unknown) {
       toast.error(e instanceof Error ? e.message : 'Submission failed')
     } finally {
@@ -92,7 +139,7 @@ export function Submit() {
     if (dropped) setFile(dropped)
   }, [])
 
-  const isSubmitDisabled = activeTemplates.length === 0 || loading
+  const isSubmitDisabled = activeTemplates.length === 0 || loading || isProcessing
 
   return (
     <div className={styles.page}>
@@ -203,7 +250,7 @@ export function Submit() {
 
             <Button
               onClick={handleSubmit}
-              loading={loading}
+              loading={loading || isProcessing}
               disabled={isSubmitDisabled || (!rawText.trim() && !file)}
               size="lg"
               style={{ width: '100%', marginTop: '1rem' }}
@@ -223,49 +270,50 @@ export function Submit() {
                 <StatusBadge status={result.status} />
               </div>
               {result.extractedJson && (
-                <Button variant="ghost" size="sm" onClick={handleCopyJson}>
-                  {copied ? <Check size={14} color="var(--color-success)" /> : <Copy size={14} />}
-                  {copied ? 'Copied' : 'Copy JSON'}
-                </Button>
+                <div className={styles.resultActions}>
+                  <Button variant="ghost" size="sm" onClick={handleCopyJson}>
+                    {copied ? <Check size={14} color="var(--color-success)" /> : <Copy size={14} />}
+                    {copied ? 'Copied' : 'Copy JSON'}
+                  </Button>
+                  <Button variant="ghost" size="sm" onClick={() => exportLogsAsJson([result], exportName)}>
+                    <Download size={14} /> JSON
+                  </Button>
+                  <Button variant="ghost" size="sm" onClick={() => exportLogsAsCsv([result], exportName)}>
+                    <Download size={14} /> CSV
+                  </Button>
+                </div>
               )}
             </div>
 
-            {/* Matched Template Info */}
-            <div className={styles.templateMetaBadge}>
-              <span className={styles.badgeLabel}>Matched Template:</span>
-              <span className={styles.badgeValue}>
-                {matchedTemplate ? `${matchedTemplate.name} (v${matchedTemplate.version})` : 'None / Unmatched'}
-              </span>
-            </div>
-
-            {result.processingMs !== null && result.processingMs !== undefined && (
-              <div className={styles.processingBadge}>
-                ⚡ Processed in {result.processingMs} ms
-              </div>
-            )}
-
-            {result.extractedJson ? (
-              <pre className={styles.json}>
-                {JSON.stringify(result.extractedJson, null, 2)}
-              </pre>
-            ) : result.validationErrors ? (
-              <div className={styles.errorBox}>
-                {failure?.kind === 'message' ? (
-                  <>
-                    <p className={styles.errorHeader}>{failure.title}</p>
-                    <p className={styles.resultMeta}>{failure.message}</p>
-                  </>
-                ) : (
-                  <>
-                    <p className={styles.errorHeader}>Validation / Pipeline Errors:</p>
-                    <pre className={styles.jsonError}>
-                      {JSON.stringify(result.validationErrors, null, 2)}
-                    </pre>
-                  </>
-                )}
-              </div>
+            {stillRunning ? (
+              <ProgressPanel log={result} timedOut={timedOut} />
             ) : (
-              <p className={styles.resultMeta}>No structured data extracted.</p>
+              <>
+              {/* Matched Template Info */}
+              <div className={styles.templateMetaBadge}>
+                <span className={styles.badgeLabel}>Matched Template:</span>
+                <span className={styles.badgeValue}>
+                  {matchedTemplate ? `${matchedTemplate.name} (v${matchedTemplate.version})` : 'None / Unmatched'}
+                </span>
+              </div>
+
+              {result.processingMs !== null && result.processingMs !== undefined && (
+                <div className={styles.processingBadge}>
+                  ⚡ Processed in {result.processingMs} ms
+                </div>
+              )}
+
+              {result.extractedJson ? (
+                <pre className={styles.json}>
+                  {JSON.stringify(result.extractedJson, null, 2)}
+                </pre>
+              ) : failure ? (
+                <FailureDetails failure={failure} />
+              ) : (
+                <p className={styles.resultMeta}>No structured data extracted.</p>
+              )}
+
+              </>
             )}
 
             <div className={styles.resultFooter}>

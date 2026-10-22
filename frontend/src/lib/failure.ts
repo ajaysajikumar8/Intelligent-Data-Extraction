@@ -1,12 +1,16 @@
 /**
  * `DocumentLog.validationErrors` is a polymorphic JSON column. The backend
- * (`extraction_pipeline.py`) writes one of three shapes when a log is FAILED:
+ * (`extraction_pipeline.py`, `failures.py`) writes one of these shapes when a
+ * log is FAILED:
  *
- *   - `[{ field, message }, ...]`  — template-schema violations (Stage 3)
- *   - `{ error: string }`          — pre-flight failure, e.g. no AI key configured
- *   - `{ pipeline_error: string }` — unexpected exception during processing
+ *   - `[{ field, message }, ...]`   — template-schema violations (Stage 3)
+ *   - `{ error, code }`             — classified, user-safe failure (see `FailureCode`)
+ *   - `{ error }`                   — legacy rows from before codes existed
+ *   - `{ pipeline_error }`          — legacy rows holding a raw exception string
  *
- * `describeFailure` normalises these so the UI never has to guess.
+ * `describeFailure` normalises these so the UI never has to guess. Legacy
+ * `pipeline_error` text is deliberately NOT displayed: it can contain raw
+ * provider errors.
  */
 
 export interface FieldIssue {
@@ -18,6 +22,22 @@ export type FailureInfo =
   | { kind: 'fields'; issues: FieldIssue[] }
   | { kind: 'message'; title: string; message: string }
   | { kind: 'unknown'; raw: unknown }
+
+/** Titles for backend `FailureCode`s. Unknown codes fall back to a generic title. */
+const FAILURE_TITLES: Record<string, string> = {
+  NO_AI_KEY: 'AI key required',
+  AI_BUSY: 'AI service is busy',
+  RATE_LIMITED: 'AI usage limit reached',
+  AI_KEY_INVALID: 'AI key rejected',
+  CONTENT_BLOCKED: 'No result from the AI',
+  BAD_AI_OUTPUT: 'Unreadable AI response',
+  UNPROCESSABLE: 'Document could not be read',
+  TIMEOUT: 'Processing timed out',
+  INTERRUPTED: 'Processing interrupted',
+  INTERNAL: 'Processing failed',
+}
+
+const GENERIC_FAILURE_MESSAGE = 'Something went wrong while processing this document. Please try again.'
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -39,10 +59,12 @@ export function describeFailure(validationErrors: unknown): FailureInfo | null {
 
   if (isRecord(validationErrors)) {
     if (typeof validationErrors.error === 'string') {
-      return { kind: 'message', title: 'Extraction could not start', message: validationErrors.error }
+      const code = typeof validationErrors.code === 'string' ? validationErrors.code : undefined
+      const title = code ? (FAILURE_TITLES[code] ?? 'Extraction failed') : 'Extraction could not start'
+      return { kind: 'message', title, message: validationErrors.error }
     }
     if (typeof validationErrors.pipeline_error === 'string') {
-      return { kind: 'message', title: 'Processing error', message: validationErrors.pipeline_error }
+      return { kind: 'message', title: 'Processing failed', message: GENERIC_FAILURE_MESSAGE }
     }
   }
 

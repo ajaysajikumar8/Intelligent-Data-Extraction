@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react'
-import { ChevronDown, ChevronRight, Webhook, FileText, CheckCircle2, XCircle, Download, AlertCircle, FileQuestion } from 'lucide-react'
+import { Fragment, useEffect, useState } from 'react'
+import { ChevronDown, ChevronRight, Webhook, FileText, CheckCircle2, XCircle, Download, FileQuestion } from 'lucide-react'
 import { ingest, logs as logsApi } from '../lib/api'
 import type { DocumentLogResponse, DocumentLogDetailResponse, ExtractionStatus, Source } from '../lib/types'
 import { StatusBadge, SourceBadge } from '../components/ui/Badge'
@@ -7,58 +7,18 @@ import { SkeletonRow } from '../components/ui/Skeleton'
 import { Drawer } from '../components/ui/Drawer'
 import { Button } from '../components/ui/Button'
 import toast from 'react-hot-toast'
-import { describeFailure, type FailureInfo } from '../lib/failure'
+import { describeFailure } from '../lib/failure'
+import { FailureDetails } from '../components/ui/FailureDetails'
+import { exportLogsAsCsv, exportLogsAsJson } from '../lib/export'
+import { isInFlight } from '../lib/status'
+import { progressHint } from '../lib/progress'
+import { ProgressPanel } from '../components/ui/ProgressPanel'
 import styles from './Logs.module.css'
-
-const FAILURE_BOX_STYLE = { background: 'var(--bg-error-subtle, rgba(239, 68, 68, 0.1))', border: '1px solid var(--border-error, #ef4444)', borderRadius: '8px', padding: '16px' } as const
-const FAILURE_BODY_STYLE = { fontSize: '13px', color: 'var(--text-color)', lineHeight: 1.5, opacity: 0.9 } as const
-
-function FailureDetails({ failure }: { failure: FailureInfo }) {
-  const title =
-    failure.kind === 'fields' ? 'Validation Engine Failed'
-    : failure.kind === 'message' ? failure.title
-    : 'Extraction Failed'
-
-  return (
-    <div style={FAILURE_BOX_STYLE}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px', color: 'var(--text-error, #ef4444)' }}>
-        <AlertCircle size={18} />
-        <strong style={{ fontSize: '14px' }}>{title}</strong>
-      </div>
-
-      {failure.kind === 'message' && (
-        <p style={{ ...FAILURE_BODY_STYLE, margin: 0, overflowWrap: 'anywhere' }}>{failure.message}</p>
-      )}
-
-      {failure.kind === 'fields' && (
-        <>
-          <p style={{ ...FAILURE_BODY_STYLE, marginBottom: '16px' }}>
-            The AI successfully extracted data, but it violated the strict rules of your template schema. Here is what needs fixing:
-          </p>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            {failure.issues.map((issue, i) => (
-              <div key={i} style={{ background: 'var(--bg-card)', padding: '10px 12px', borderRadius: '6px', fontSize: '13px', display: 'flex', gap: '8px', alignItems: 'flex-start' }}>
-                <span style={{ color: '#ef4444' }}>🔴</span>
-                <div>
-                  <strong style={{ display: 'block', marginBottom: '2px' }}>Field: <code style={{ background: 'var(--bg-subtle)', padding: '2px 4px', borderRadius: '4px', fontSize: '12px' }}>{issue.field}</code></strong>
-                  <span style={{ color: 'var(--text-muted)' }}>Issue: {issue.message}</span>
-                </div>
-              </div>
-            ))}
-          </div>
-        </>
-      )}
-
-      {failure.kind === 'unknown' && (
-        <pre className={styles.json} style={{ margin: 0 }}>{JSON.stringify(failure.raw, null, 2)}</pre>
-      )}
-    </div>
-  )
-}
 
 const STATUS_OPTIONS: ExtractionStatus[] = ['SUCCESS', 'NEEDS_REVIEW', 'FAILED', 'UNMATCHED', 'PENDING', 'PROCESSING']
 const SOURCE_OPTIONS: Source[] = ['MANUAL', 'API', 'EMAIL', 'WEBHOOK']
 const PAGE_SIZE = 20
+const REFRESH_MS = 3000
 
 export function Logs() {
   const [logs, setLogs] = useState<DocumentLogResponse[]>([])
@@ -85,6 +45,33 @@ export function Logs() {
       .finally(() => setLoading(false))
   }, [skip, filterStatus, filterSource])
 
+  // Extractions run in a background queue: keep the list fresh while any row is still in flight.
+  const hasInFlight = logs.some((l) => isInFlight(l.status))
+  useEffect(() => {
+    if (!hasInFlight) return
+    const timer = setInterval(() => {
+      ingest.list({
+        skip,
+        limit: PAGE_SIZE,
+        status: filterStatus || undefined,
+        source: filterSource || undefined,
+      })
+        .then(setLogs)
+        .catch(() => {}) // transient failure: try again on the next tick
+    }, REFRESH_MS)
+    return () => clearInterval(timer)
+  }, [hasInFlight, skip, filterStatus, filterSource])
+
+  // An open drawer loaded while a job was in flight goes stale when the job finishes.
+  useEffect(() => {
+    if (!expanded) return
+    const row = logs.find((l) => l.id === expanded)
+    const detail = details[expanded]
+    if (row && detail && (row.status !== detail.status || JSON.stringify(row.progress) !== JSON.stringify(detail.progress))) {
+      logsApi.get(expanded).then((data) => setDetails((prev) => ({ ...prev, [expanded]: data })))
+    }
+  }, [logs, expanded, details])
+
   const toggle = (id: string) => {
     setExpanded((prev) => (prev === id ? null : id))
     setEditingLogId(null) // reset editing state
@@ -110,68 +97,9 @@ export function Logs() {
     }
   }
 
-  const handleExportJson = () => {
-    const data = JSON.stringify(logs, null, 2)
-    const blob = new Blob([data], { type: 'application/json' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `extractions_export_${new Date().toISOString()}.json`
-    a.click()
-    URL.revokeObjectURL(url)
-  }
+  const handleExportJson = () => exportLogsAsJson(logs)
 
-  const handleExportCsv = () => {
-    if (logs.length === 0) return
-    
-    // Attempt a simple CSV flattening of extractedJson
-    const rows: string[] = []
-    const headers = new Set<string>(['id', 'status', 'source', 'createdAt', 'fileName'])
-    
-    // Discover keys
-    const flatData = logs.map(log => {
-      const base: Record<string, string> = {
-        id: log.id,
-        createdAt: new Date(log.createdAt).toISOString(),
-        status: log.status,
-        source: log.source,
-        fileName: log.fileName || ''
-      }
-      if (log.extractedJson) {
-        let json: unknown = log.extractedJson
-        if (Array.isArray(json) && json.length > 0) {
-          json = json[0] // take first item if array
-        }
-        if (typeof json === 'object' && json !== null) {
-          for (const [k, v] of Object.entries(json)) {
-            headers.add(`data.${k}`)
-            base[`data.${k}`] = typeof v === 'object' ? JSON.stringify(v) : String(v)
-          }
-        }
-      }
-      return base
-    })
-
-    const headerRow = Array.from(headers)
-    rows.push(headerRow.join(','))
-
-    for (const d of flatData) {
-      const row = headerRow.map(h => {
-        const val = d[h] || ''
-        const escaped = String(val).replace(/"/g, '""')
-        return `"${escaped}"`
-      })
-      rows.push(row.join(','))
-    }
-
-    const blob = new Blob([rows.join('\n')], { type: 'text/csv' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `extractions_export_${new Date().toISOString()}.csv`
-    a.click()
-    URL.revokeObjectURL(url)
-  }
+  const handleExportCsv = () => exportLogsAsCsv(logs)
 
   return (
     <div className={styles.page}>
@@ -235,9 +163,8 @@ export function Logs() {
                   </tr>
                 )
                 : logs.map((log) => (
-                  <>
+                  <Fragment key={log.id}>
                     <tr
-                      key={log.id}
                       className={styles.row}
                       onClick={() => toggle(log.id)}
                     >
@@ -249,7 +176,12 @@ export function Logs() {
                       <td className={styles.docCell}>
                         {log.fileName ?? (log.rawInput ? log.rawInput.slice(0, 50) + '…' : log.id.slice(0, 12))}
                       </td>
-                      <td><StatusBadge status={log.status} /></td>
+                      <td>
+                        <StatusBadge status={log.status} />
+                        {progressHint(log.status, log.progress) && (
+                          <span className={styles.rowHint}>{progressHint(log.status, log.progress)}</span>
+                        )}
+                      </td>
                       <td><SourceBadge source={log.source} /></td>
                       <td className={styles.mono}>
                         {log.processingMs != null ? `${log.processingMs}ms` : '—'}
@@ -258,7 +190,7 @@ export function Logs() {
                         {new Date(log.createdAt).toLocaleString()}
                       </td>
                     </tr>
-                  </>
+                  </Fragment>
                 ))}
           </tbody>
         </table>
@@ -326,7 +258,9 @@ export function Logs() {
                   <CheckCircle2 size={16} />
                   <p className={styles.detailLabel}>Extraction Result</p>
                 </div>
-                {details[expanded].extractedJson ? (
+                {isInFlight(details[expanded].status) ? (
+                  <ProgressPanel log={details[expanded]} />
+                ) : details[expanded].extractedJson ? (
                   <div className={styles.jsonContainer}>
                     {typeof details[expanded].extractedJson === 'object' && !Array.isArray(details[expanded].extractedJson) ? (
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>

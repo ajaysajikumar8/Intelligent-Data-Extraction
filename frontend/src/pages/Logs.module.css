@@ -211,3 +211,12 @@
   font-style: italic;
 }
 
+
+/* Live hint under the status badge for queued / running rows */
+.rowHint {
+  display: block;
+  margin-top: var(--space-1);
+  font-size: var(--text-xs);
+  color: var(--color-text-subtle);
+  font-variant-numeric: tabular-nums;
+}

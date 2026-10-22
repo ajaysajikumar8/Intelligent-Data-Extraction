@@ -106,6 +106,15 @@ export interface TemplateUpdate {
 
 // ── Document Logs ──────────────────────────────────────────────────────────
 
+/** Live progress written by the extraction pipeline while a document is PENDING/PROCESSING. */
+export interface ExtractionProgress {
+  stage: 'CLASSIFYING' | 'EXTRACTING'
+  attempt: number
+  maxAttempts: number
+  /** Set (to a failure code such as AI_BUSY) while the pipeline is waiting to retry. */
+  retryReason: string | null
+}
+
 export interface DocumentLogResponse {
   id: string
   workspaceId: string
@@ -121,6 +130,7 @@ export interface DocumentLogResponse {
   confidenceScores: Record<string, 'High' | 'Medium' | 'Low'> | null
   validationErrors: unknown[] | Record<string, unknown> | null
   processingMs: number | null
+  progress: ExtractionProgress | null
   createdAt: string
 }
 

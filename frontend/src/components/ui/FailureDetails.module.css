@@ -1,0 +1,50 @@
+.box {
+  background: var(--color-error-subtle);
+  border: 1px solid var(--color-error);
+  border-radius: var(--radius-md);
+  padding: var(--space-4);
+}
+.head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+  color: var(--color-error);
+}
+.title { font-size: var(--text-base); font-weight: var(--font-semibold); }
+.message {
+  margin: 0;
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  color: var(--color-text);
+  overflow-wrap: anywhere;
+}
+.intro { composes: message; margin-bottom: var(--space-4); }
+.issues { display: flex; flex-direction: column; gap: var(--space-2); }
+.issue {
+  display: flex;
+  gap: var(--space-2);
+  align-items: flex-start;
+  padding: var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  font-size: var(--text-sm);
+}
+.dot { color: var(--color-error); }
+.field { display: block; margin-bottom: 2px; color: var(--color-text); }
+.code {
+  background: var(--color-surface-2);
+  padding: 2px 4px;
+  border-radius: var(--radius-xs);
+  font-size: var(--text-xs);
+}
+.issueText { color: var(--color-text-muted); }
+.raw {
+  margin: 0;
+  padding: var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-size: var(--text-xs);
+  overflow-x: auto;
+}

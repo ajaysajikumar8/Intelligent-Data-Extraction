@@ -28,7 +28,7 @@ test.describe('Regression Suite', () => {
     expect(val).toBe('https://my-rapid-typing-webhook.com/api');
   });
 
-  test('Bug 2: Submit Button Stuck & Redirect', async ({ page }) => {
+  test('Bug 2: Submit Button Not Stuck, Result Stays On Page', async ({ page }) => {
     // First, add a template from the library
     await page.goto('http://localhost:5178/templates');
     await page.click('text=Template Library');
@@ -41,9 +41,10 @@ test.describe('Regression Suite', () => {
     await page.fill('textarea', 'Test extraction for redirect bug.');
     await page.click('button:has-text("Run extraction")');
     
-    // Should automatically redirect to logs
-    await page.waitForURL('**/logs', { timeout: 10000 });
-    expect(page.url()).toContain('/logs');
+    // Result is shown on the page (no redirect) and the button is usable again
+    await expect(page.getByRole('heading', { name: 'Extraction Result' })).toBeVisible({ timeout: 10000 });
+    expect(page.url()).toContain('/submit');
+    await expect(page.locator('button:has-text("Run extraction")')).toBeEnabled();
   });
 
   test('Bug 3 & UX Flaw 3: Auth Validation & Correction UI', async ({ page }) => {
