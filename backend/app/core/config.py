@@ -72,6 +72,13 @@ class Settings(BaseSettings):
     FRONTEND_URL: str = "http://localhost:5173"
 
     # ------------------------------------------------------------------ #
+    # Outbound webhooks — SSRF protection (see app/core/url_safety.py).
+    # By default customer webhook URLs must resolve to PUBLIC addresses only. Set true
+    # in local development to deliver to localhost; never in production.
+    # ------------------------------------------------------------------ #
+    WEBHOOK_ALLOW_PRIVATE_HOSTS: bool = False
+
+    # ------------------------------------------------------------------ #
     # Public API base URL — used to build inbound webhook URLs shown to customers
     # ------------------------------------------------------------------ #
     API_BASE_URL: str = "http://localhost:8000"

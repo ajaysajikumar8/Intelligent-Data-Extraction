@@ -175,8 +175,15 @@ export function Integrations() {
   const handlePing = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation()
     try {
-      await webhooks.ping(id)
-      toast.success('Ping payload dispatched. Check deliveries for result.')
+      const result = await webhooks.ping(id)
+      if (result.success) {
+        toast.success(`Ping delivered (HTTP ${result.statusCode}).`)
+      } else if (result.statusCode === null) {
+        // Not sent (blocked destination) or unreachable. The server's own refusal text is safe to show.
+        toast.error(result.responseBody.startsWith('Webhook URL') ? result.responseBody : 'Could not reach the webhook URL.')
+      } else {
+        toast.error(`The endpoint answered HTTP ${result.statusCode}. Check deliveries for details.`)
+      }
       if (activeWebhook?.id === id) {
         loadDeliveries(id)
       }

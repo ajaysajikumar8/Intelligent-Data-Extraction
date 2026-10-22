@@ -28,6 +28,7 @@ from app.core.auth import get_current_workspace
 from app.core.config import get_settings
 from app.core.db import db
 from app.core.security import generate_inbound_secret, hmac_sign
+from app.core.url_safety import UnsafeUrlError, assert_url_allowed, safe_post
 from app.models.schemas import (
     InboundSecretResponse,
     WebhookCreate,
@@ -40,6 +41,14 @@ logger = logging.getLogger("app.api.webhooks")
 router = APIRouter()
 
 _PING_TIMEOUT = 10.0
+
+
+async def _require_allowed_url(url: str) -> None:
+    """Reject webhook URLs that would make the server call internal/private addresses (SSRF)."""
+    try:
+        await assert_url_allowed(url)
+    except UnsafeUrlError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from None
 
 
 # ---------------------------------------------------------------------------
@@ -130,6 +139,8 @@ async def create_webhook(
                 detail=f"Webhook limit of {plan.maxWebhooks} reached for plan '{plan.name}'.",
             )
 
+    await _require_allowed_url(str(payload.url))
+
     wh = await db.webhookendpoint.create(
         data={
             "workspace": {"connect": {"id": workspace.id}},
@@ -180,6 +191,7 @@ async def update_webhook(
 
     update_data: dict = {}
     if payload.url is not None:
+        await _require_allowed_url(str(payload.url))
         update_data["url"] = str(payload.url)
     if payload.description is not None:
         update_data["description"] = payload.description
@@ -241,8 +253,9 @@ async def ping_webhook(
     signature = hmac_sign(wh.secret, payload_bytes)
 
     try:
-        async with httpx.AsyncClient(timeout=_PING_TIMEOUT) as client:
-            response = await client.post(
+        async with httpx.AsyncClient(timeout=_PING_TIMEOUT, follow_redirects=False) as client:
+            response = await safe_post(
+                client,
                 wh.url,
                 content=payload_bytes,
                 headers={
@@ -255,6 +268,11 @@ async def ping_webhook(
         status_code = response.status_code
         response_body = response.text[:500]
         success = response.is_success
+    except UnsafeUrlError as exc:
+        # Never contact the target, and never echo anything it could have returned.
+        status_code = None
+        response_body = str(exc)
+        success = False
     except httpx.RequestError as exc:
         status_code = None
         response_body = str(exc)

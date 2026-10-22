@@ -28,6 +28,7 @@ from prisma.models import DocumentLog
 
 from app.core.db import db
 from app.core.security import hmac_sign
+from app.core.url_safety import UnsafeUrlError, safe_post
 
 logger = logging.getLogger("app.services.webhook_dispatcher")
 
@@ -95,7 +96,7 @@ async def _dispatch_all(doc_log: DocumentLog) -> None:
     payload = _build_payload(doc_log)
     payload_bytes = json.dumps(payload).encode("utf-8")
 
-    async with httpx.AsyncClient(timeout=DELIVERY_TIMEOUT_SECONDS) as client:
+    async with httpx.AsyncClient(timeout=DELIVERY_TIMEOUT_SECONDS, follow_redirects=False) as client:
         for endpoint in matching:
             await _deliver(client, endpoint, doc_log, payload_bytes)
 
@@ -158,11 +159,9 @@ async def _deliver(
     error_msg: str | None = None
 
     try:
-        response = await client.post(
-            endpoint.url,
-            content=payload_bytes,
-            headers=headers,
-        )
+        # safe_post re-validates the destination on every delivery (stored URLs may predate
+        # the SSRF check, or DNS may have changed) and connects only to a public address.
+        response = await safe_post(client, endpoint.url, content=payload_bytes, headers=headers)
         status_code = response.status_code
         response_body = response.text[:2000]  # Cap at 2 KB for storage
         duration_ms = int((time.monotonic() - start) * 1000)
@@ -188,6 +187,12 @@ async def _deliver(
                 status_code,
             )
             await _increment_failure(endpoint)
+
+    except UnsafeUrlError as exc:
+        error_msg = f"Blocked: {exc}"
+        duration_ms = int((time.monotonic() - start) * 1000)
+        logger.warning("[%s] Refused to deliver to webhook %s: %s", doc_log.id, endpoint.id, exc)
+        await _increment_failure(endpoint)
 
     except httpx.TimeoutException:
         error_msg = f"Request timed out after {DELIVERY_TIMEOUT_SECONDS}s"
