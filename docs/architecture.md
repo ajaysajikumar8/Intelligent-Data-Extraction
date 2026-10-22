@@ -11,7 +11,7 @@ Data can enter the pipeline via two modes:
 Both modes converge on the same FastAPI ingestion endpoint and follow the identical AI processing pipeline downstream.
 
 ### Implementation Strategy: Manual-First Vertical Slice
-To eliminate external OAuth setup friction and accelerate feedback loops during development, the system is built as a **Manual-First Vertical Slice** (see [ADR-002](file:///home/ajay/Projects/personal/Intelligent-Data-Extraction/docs/adr/002-manual-first-vertical-slice.md)). We implement and validate the full end-to-end pipeline via manual paste/file submission before attaching automated email webhooks.
+To eliminate external OAuth setup friction and accelerate feedback loops during development, the system is built as a **Manual-First Vertical Slice** (see [ADR-002](adr/002-manual-first-vertical-slice.md)). We implement and validate the full end-to-end pipeline via manual paste/file submission before attaching automated email webhooks.
 
 ## Data Flow
 
