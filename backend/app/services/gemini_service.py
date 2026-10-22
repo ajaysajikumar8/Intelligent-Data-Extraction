@@ -59,15 +59,16 @@ def _get_client(api_key: str | None = None) -> genai.Client:
     return _client_cache[key]
 
 
-def _model_name() -> str:
-    return get_settings().GEMINI_MODEL
+def _model_name(model: str | None = None) -> str:
+    """The model to call: an explicit override (e.g. the backup model) or the configured primary."""
+    return model or get_settings().GEMINI_MODEL
 
 
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
-async def generate_text(prompt: str, api_key: str | None = None) -> str:
+async def generate_text(prompt: str, api_key: str | None = None, model: str | None = None) -> str:
     """
     Send a plain-text prompt to Gemini and return the response text.
 
@@ -85,7 +86,7 @@ async def generate_text(prompt: str, api_key: str | None = None) -> str:
     logger.debug("Sending text prompt to Gemini (%d chars)", len(prompt))
 
     response = await client.aio.models.generate_content(
-        model=_model_name(),
+        model=_model_name(model),
         contents=prompt,
         config=GENERATION_CONFIG,
     )
@@ -105,6 +106,7 @@ async def generate_with_file(
     file_bytes: bytes,
     mime_type: str,
     api_key: str | None = None,
+    model: str | None = None,
 ) -> str:
     """
     Send a multimodal prompt to Gemini with an inline binary file
@@ -129,7 +131,7 @@ async def generate_with_file(
     file_part = types.Part.from_bytes(data=file_bytes, mime_type=mime_type)
 
     response = await client.aio.models.generate_content(
-        model=_model_name(),
+        model=_model_name(model),
         contents=[prompt, file_part],
         config=GENERATION_CONFIG,
     )
@@ -150,6 +152,7 @@ async def generate_with_text_and_file(
     file_bytes: bytes,
     mime_type: str,
     api_key: str | None = None,
+    model: str | None = None,
 ) -> str:
     """
     Send a hybrid multimodal prompt containing BOTH a text body AND an inline
@@ -177,7 +180,7 @@ async def generate_with_text_and_file(
 
     # Pass [instruction_prompt, text_body, file] so Gemini sees both sources
     response = await client.aio.models.generate_content(
-        model=_model_name(),
+        model=_model_name(model),
         contents=[prompt, text_body, file_part],
         config=GENERATION_CONFIG,
     )

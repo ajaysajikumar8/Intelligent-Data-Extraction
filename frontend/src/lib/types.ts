@@ -113,6 +113,8 @@ export interface ExtractionProgress {
   maxAttempts: number
   /** Set (to a failure code such as AI_BUSY) while the pipeline is waiting to retry. */
   retryReason: string | null
+  /** The next attempt runs on the configured backup model (primary was overloaded). */
+  usingBackupModel?: boolean
 }
 
 export interface DocumentLogResponse {

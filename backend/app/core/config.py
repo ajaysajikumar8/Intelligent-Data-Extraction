@@ -36,6 +36,11 @@ class Settings(BaseSettings):
     # ------------------------------------------------------------------ #
     GEMINI_API_KEY: str
     GEMINI_MODEL: str = "gemini-3.8-flash"
+    # Optional backup model. When the primary model is overloaded (5xx / timeout), retries
+    # switch to this one so a busy newest model degrades to a slightly older one instead of
+    # failing the user. Opt-in: leave unset to disable. Must be a model this key can use
+    # (e.g. one version behind GEMINI_MODEL); an unusable value is ignored at runtime.
+    GEMINI_FALLBACK_MODEL: str | None = None
 
     # ------------------------------------------------------------------ #
     # Extraction queue (in-process — see docs/adr/006-async-extraction-queue.md)

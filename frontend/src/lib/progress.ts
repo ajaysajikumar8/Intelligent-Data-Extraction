@@ -19,17 +19,21 @@ export function describeProgress(status: ExtractionStatus, progress: ExtractionP
     return { headline: 'Queued', detail: 'Waiting for a free processing slot.', step: 0, retrying: false }
   }
   if (progress?.retryReason) {
+    const retrying = `attempt ${progress.attempt} of ${progress.maxAttempts}`
     return {
       headline: 'The AI service is busy',
-      detail: `Retrying automatically (attempt ${progress.attempt} of ${progress.maxAttempts}). No action needed.`,
+      detail: progress.usingBackupModel
+        ? `Switching to a backup AI model and retrying automatically (${retrying}). No action needed.`
+        : `Retrying automatically (${retrying}). No action needed.`,
       step: stageStep(progress.stage),
       retrying: true,
     }
   }
+  const backup = progress?.usingBackupModel ? ' Using a backup AI model.' : ''
   if (progress?.stage === 'EXTRACTING') {
-    return { headline: 'Extracting fields', detail: 'Pulling the data out of your document.', step: 2, retrying: false }
+    return { headline: 'Extracting fields', detail: `Pulling the data out of your document.${backup}`, step: 2, retrying: false }
   }
-  return { headline: 'Reading your document', detail: 'Working out which template fits.', step: 1, retrying: false }
+  return { headline: 'Reading your document', detail: `Working out which template fits.${backup}`, step: 1, retrying: false }
 }
 
 /** Short label for a table row, or null when the status badge says enough. */

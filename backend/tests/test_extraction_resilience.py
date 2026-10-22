@@ -190,6 +190,88 @@ async def test_unparseable_ai_output_is_a_friendly_failure():
 
 
 @pytest.mark.asyncio
+async def test_backup_model_takes_over_when_primary_is_overloaded():
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        ws = await _make_workspace(client)
+        template_id = await _make_template(client, ws["headers"])
+        payload = json.dumps({"vendor_name": "Acme", "total_amount": 10})
+        models: list = []
+        progress_on_retry: dict = {}
+
+        async def scripted(prompt: str, api_key=None, model=None):
+            models.append(model)
+            if model is None:
+                raise _api_error(genai_errors.ServerError, 503)  # the primary is overloaded
+            if len(models) == 2:  # first backup attempt: progress must already announce it
+                doc = await db.documentlog.find_first(where={"workspaceId": ws["workspace_id"]})
+                progress_on_retry.update(doc.progress or {})
+            return template_id if "document classification engine" in prompt else payload
+
+        with patch.object(get_settings(), "GEMINI_FALLBACK_MODEL", "backup-model"), \
+             patch("app.services.extraction_pipeline._RETRY_BASE_DELAY_S", 0), \
+             patch("app.services.gemini_service.generate_text", new=scripted):
+            doc_id = await _submit(client, ws)
+            log = await _final_log(client, ws, doc_id)
+
+        assert log["status"] == "SUCCESS", log
+        # stage 1: primary fails, backup succeeds; stage 2 starts on the backup (no wasted attempt)
+        assert models == [None, "backup-model", "backup-model"]
+        assert progress_on_retry["usingBackupModel"] is True
+        assert progress_on_retry["retryReason"] == "AI_BUSY"
+        await _cleanup(ws)
+
+
+@pytest.mark.asyncio
+async def test_unusable_backup_model_never_masks_the_primary_failure():
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        ws = await _make_workspace(client)
+        await _make_template(client, ws["headers"])
+        models: list = []
+
+        async def scripted(prompt: str, api_key=None, model=None):
+            models.append(model)
+            if model is None:
+                raise _api_error(genai_errors.ServerError, 503)
+            raise _api_error(genai_errors.ClientError, 404, "NOT_FOUND")  # retired backup model
+
+        with patch.object(get_settings(), "GEMINI_FALLBACK_MODEL", "retired-model"), \
+             patch("app.services.extraction_pipeline._RETRY_BASE_DELAY_S", 0), \
+             patch("app.services.gemini_service.generate_text", new=scripted):
+            doc_id = await _submit(client, ws)
+            log = await _final_log(client, ws, doc_id)
+
+        assert log["status"] == "FAILED"
+        assert log["validationErrors"]["code"] == "AI_BUSY"  # the honest reason, not INTERNAL
+        assert models == [None, "retired-model", None]  # backup tried once, then dropped
+        await _cleanup(ws)
+
+
+@pytest.mark.asyncio
+async def test_no_backup_model_configured_never_overrides_the_model():
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        ws = await _make_workspace(client)
+        template_id = await _make_template(client, ws["headers"])
+        payload = json.dumps({"vendor_name": "Acme", "total_amount": 10})
+        models: list = []
+
+        async def scripted(prompt: str, api_key=None, model=None):
+            models.append(model)
+            if len(models) == 1:
+                raise _api_error(genai_errors.ServerError, 503)
+            return template_id if "document classification engine" in prompt else payload
+
+        with patch.object(get_settings(), "GEMINI_FALLBACK_MODEL", None), \
+             patch("app.services.extraction_pipeline._RETRY_BASE_DELAY_S", 0), \
+             patch("app.services.gemini_service.generate_text", new=scripted):
+            doc_id = await _submit(client, ws)
+            log = await _final_log(client, ws, doc_id)
+
+        assert log["status"] == "SUCCESS"
+        assert models == [None, None, None]
+        await _cleanup(ws)
+
+
+@pytest.mark.asyncio
 async def test_non_transient_error_is_not_retried():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         ws = await _make_workspace(client)
@@ -216,7 +298,7 @@ async def test_progress_is_visible_during_retry_and_cleared_when_done():
         seen: dict = {}
         calls = 0
 
-        async def scripted(prompt: str, api_key=None):
+        async def scripted(prompt: str, api_key=None, model=None):
             nonlocal calls
             calls += 1
             if calls == 1:
@@ -236,6 +318,7 @@ async def test_progress_is_visible_during_retry_and_cleared_when_done():
         assert seen["progress"] == {
             "stage": "CLASSIFYING", "attempt": 2,
             "maxAttempts": extraction_pipeline._MAX_ATTEMPTS, "retryReason": "AI_BUSY",
+            "usingBackupModel": False,
         }
         assert log["status"] == "SUCCESS"
         assert log["progress"] is None  # nothing in flight any more
@@ -250,7 +333,7 @@ async def test_hung_provider_call_is_cut_off_and_retried():
         payload = json.dumps({"vendor_name": "Acme", "total_amount": 10})
         calls = 0
 
-        async def scripted(prompt: str, api_key=None):
+        async def scripted(prompt: str, api_key=None, model=None):
             nonlocal calls
             calls += 1
             if calls == 1:

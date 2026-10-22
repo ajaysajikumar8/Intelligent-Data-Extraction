@@ -29,6 +29,7 @@ import json
 import logging
 import random
 import time
+from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, TypeVar
 
 from pydantic import BaseModel, ValidationError, create_model
@@ -36,6 +37,7 @@ from prisma.models import DocumentLog, Template
 from prisma.fields import Json
 
 from app.core.db import db
+from app.core.config import get_settings
 from app.services import failures
 from app.services import gemini_service
 from app.services import webhook_dispatcher
@@ -101,6 +103,7 @@ async def run(
     Returns the final DocumentLog record after updating status in the DB.
     """
     start_ms = time.monotonic()
+    router = _ModelRouter(backup=get_settings().GEMINI_FALLBACK_MODEL or None)
 
     # ------------------------------------------------------------------
     # Resolve which API key to use
@@ -164,15 +167,17 @@ async def run(
             matched_template = await _call_with_fallback(
                 doc_log_id=doc_log_id,
                 stage="CLASSIFYING",
+                router=router,
                 custom_api_key=custom_api_key,
                 allow_platform_fallback=allow_platform_fallback,
-                fn=lambda key: _classify(
+                fn=lambda key, model: _classify(
                     doc_log_id=doc_log_id,
                     templates=templates,
                     raw_text=raw_text,
                     file_bytes=file_bytes,
                     mime_type=mime_type,
                     api_key=key,
+                    model=model,
                 ),
             )
 
@@ -196,19 +201,21 @@ async def run(
         # ------------------------------------------------------------------ #
         # Stage 2: Schema Extraction
         # ------------------------------------------------------------------ #
-        await _set_progress(doc_log_id, "EXTRACTING")
+        await _set_progress(doc_log_id, "EXTRACTING", backup_model=router.use_backup)
         raw_json_str = await _call_with_fallback(
             doc_log_id=doc_log_id,
             stage="EXTRACTING",
+            router=router,
             custom_api_key=custom_api_key,
             allow_platform_fallback=allow_platform_fallback,
-            fn=lambda key: _extract(
+            fn=lambda key, model: _extract(
                 doc_log_id=doc_log_id,
                 template=matched_template,
                 raw_text=raw_text,
                 file_bytes=file_bytes,
                 mime_type=mime_type,
                 api_key=key,
+                model=model,
             ),
         )
 
@@ -270,24 +277,51 @@ async def run(
 T = TypeVar("T")
 
 
-def _progress(stage: str, attempt: int = 1, retry_reason: str | None = None) -> dict[str, Any]:
+@dataclass
+class _ModelRouter:
+    """
+    Per-job choice between the primary model and the optional backup model.
+
+    Shared by both stages of a job: once the primary has failed transiently, later
+    stages start on the backup instead of spending another attempt on a model we
+    already know is busy. `backup=None` means the feature is off, or the backup was
+    found unusable (retired/404) and dropped.
+    """
+
+    backup: str | None
+    use_backup: bool = False
+
+    @property
+    def model(self) -> str | None:
+        """Model override for the next call (None = the configured primary)."""
+        return self.backup if self.use_backup else None
+
+
+def _progress(
+    stage: str, attempt: int = 1, retry_reason: str | None = None, backup_model: bool = False
+) -> dict[str, Any]:
     """Live progress shown to the user while a document is in flight."""
     return {
         "stage": stage,
         "attempt": attempt,
         "maxAttempts": _MAX_ATTEMPTS,
         "retryReason": retry_reason,  # a FailureCode while waiting to retry, else None
+        "usingBackupModel": backup_model,  # the next attempt runs on GEMINI_FALLBACK_MODEL
     }
 
 
 async def _set_progress(
-    doc_log_id: str, stage: str, attempt: int = 1, retry_reason: str | None = None
+    doc_log_id: str,
+    stage: str,
+    attempt: int = 1,
+    retry_reason: str | None = None,
+    backup_model: bool = False,
 ) -> None:
     """Best-effort: progress is informational and must never fail a job."""
     try:
         await db.documentlog.update(
             where={"id": doc_log_id},
-            data={"progress": Json(_progress(stage, attempt, retry_reason))},  # type: ignore[arg-type]
+            data={"progress": Json(_progress(stage, attempt, retry_reason, backup_model))},  # type: ignore[arg-type]
         )
     except Exception as exc:  # noqa: BLE001
         logger.warning("[%s] Could not record progress: %s", doc_log_id, exc)
@@ -296,9 +330,10 @@ async def _set_progress(
 async def _call_with_fallback(
     doc_log_id: str,
     stage: str,
+    router: _ModelRouter,
     custom_api_key: str | None,
     allow_platform_fallback: bool,
-    fn: Callable[[str | None], Awaitable[T]],
+    fn: Callable[[str | None, str | None], Awaitable[T]],
 ) -> T:
     """
     Call `fn` with the workspace's custom BYOAK key if set.
@@ -311,43 +346,69 @@ async def _call_with_fallback(
     """
     if not custom_api_key:
         # No custom key — caller already verified fallback is allowed.
-        return await _with_retries(doc_log_id, stage, lambda: fn(None))
+        return await _with_retries(doc_log_id, stage, router, lambda model: fn(None, model))
 
     try:
-        return await _with_retries(doc_log_id, stage, lambda: fn(custom_api_key))
+        return await _with_retries(doc_log_id, stage, router, lambda model: fn(custom_api_key, model))
     except Exception as exc:
         if allow_platform_fallback and gemini_service.is_quota_error(exc):
             logger.warning(
                 "[%s] Custom Gemini key quota exhausted — falling back to platform key",
                 doc_log_id,
             )
-            return await _with_retries(doc_log_id, stage, lambda: fn(None))
+            return await _with_retries(doc_log_id, stage, router, lambda model: fn(None, model))
         raise
 
 
-async def _with_retries(doc_log_id: str, stage: str, call: Callable[[], Awaitable[T]]) -> T:
+async def _with_retries(
+    doc_log_id: str, stage: str, router: _ModelRouter, call: Callable[[str | None], Awaitable[T]]
+) -> T:
     """
-    Run `call`, retrying transient provider errors (5xx / network / per-call
+    Run `call(model)`, retrying transient provider errors (5xx / network / per-call
     timeout) with exponential backoff and jitter, and recording each retry in the
-    document's live progress. Non-transient errors — including quota (429),
-    which `_call_with_fallback` handles by switching keys — propagate immediately.
+    document's live progress. Non-transient errors — including quota (429), which
+    `_call_with_fallback` handles by switching keys — propagate immediately.
+
+    Backup model: the first attempt uses the configured primary model. After it
+    fails transiently, the remaining attempts (and later stages of the same job) use
+    GEMINI_FALLBACK_MODEL if configured. If the backup itself proves unusable (e.g.
+    retired, 404) it is dropped and the primary is retried, and the primary's error
+    is what finally surfaces: a bad backup setting must never mask "the AI is busy".
     """
+    last_transient: Exception | None = None
+
     for attempt in range(1, _MAX_ATTEMPTS + 1):
+        model = router.model
         try:
-            return await asyncio.wait_for(call(), timeout=_CALL_TIMEOUT_S)
+            result = await asyncio.wait_for(call(model), timeout=_CALL_TIMEOUT_S)
+            if model:
+                logger.info("[%s] %s completed on backup model '%s'", doc_log_id, stage, model)
+            return result
         except Exception as exc:
-            if attempt == _MAX_ATTEMPTS or not failures.is_transient(exc):
+            if failures.is_transient(exc):
+                last_transient = exc
+                router.use_backup = router.backup is not None  # this model is busy: try the backup next
+            elif model is not None:
+                # The backup model itself is unusable (e.g. retired): drop it, retry the primary.
+                logger.warning(
+                    "[%s] Backup model '%s' unusable (%s); continuing on the primary model",
+                    doc_log_id, model, type(exc).__name__,
+                )
+                router.backup, router.use_backup = None, False
+            else:
                 raise
+            if attempt == _MAX_ATTEMPTS:
+                raise last_transient or exc
             delay = _RETRY_BASE_DELAY_S * 2 ** (attempt - 1)
             delay += random.uniform(0, delay * 0.25)  # jitter avoids synchronised retries
-            await _set_progress(doc_log_id, stage, attempt + 1, failures.classify(exc).code.value)
+            await _set_progress(
+                doc_log_id, stage, attempt + 1,
+                failures.classify(last_transient or exc).code.value, router.use_backup,
+            )
             logger.warning(
-                "[%s] Transient AI error (attempt %d/%d), retrying in %.1fs: %s",
-                doc_log_id,
-                attempt,
-                _MAX_ATTEMPTS,
-                delay,
-                exc,
+                "[%s] AI call failed (attempt %d/%d, model=%s), retrying in %.1fs%s: %s",
+                doc_log_id, attempt, _MAX_ATTEMPTS, model or "primary", delay,
+                " on the backup model" if router.use_backup else "", exc,
             )
             await asyncio.sleep(delay)
     raise AssertionError("unreachable")  # pragma: no cover
@@ -364,6 +425,7 @@ async def _classify(
     file_bytes: bytes | None,
     mime_type: str | None,
     api_key: str | None = None,
+    model: str | None = None,
 ) -> Template | None:
     """
     Ask Gemini which template best matches the document.
@@ -401,16 +463,18 @@ async def _classify(
             file_bytes=file_bytes,
             mime_type=mime_type or "application/octet-stream",
             api_key=api_key,
+            model=model,
         )
     elif raw_text:
         prompt += raw_text
-        response = await gemini_service.generate_text(prompt, api_key=api_key)
+        response = await gemini_service.generate_text(prompt, api_key=api_key, model=model)
     else:
         response = await gemini_service.generate_with_file(
             prompt=prompt,
             file_bytes=file_bytes,  # type: ignore[arg-type]
             mime_type=mime_type or "application/octet-stream",
             api_key=api_key,
+            model=model,
         )
 
     response = response.strip()
@@ -442,6 +506,7 @@ async def _extract(
     file_bytes: bytes | None,
     mime_type: str | None,
     api_key: str | None = None,
+    model: str | None = None,
 ) -> str:
     """
     Ask Gemini to extract fields defined in the template’s extractionSchema.
@@ -507,16 +572,18 @@ async def _extract(
             file_bytes=file_bytes,
             mime_type=mime_type or "application/octet-stream",
             api_key=api_key,
+            model=model,
         )
     elif raw_text:
         prompt += raw_text
-        return await gemini_service.generate_text(prompt, api_key=api_key)
+        return await gemini_service.generate_text(prompt, api_key=api_key, model=model)
     else:
         return await gemini_service.generate_with_file(
             prompt=prompt,
             file_bytes=file_bytes,  # type: ignore[arg-type]
             mime_type=mime_type or "application/octet-stream",
             api_key=api_key,
+            model=model,
         )
 
 

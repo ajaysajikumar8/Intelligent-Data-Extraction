@@ -50,6 +50,12 @@ Problems this caused:
    (attempt 2 of 3)", and a running timer. Writing it is best-effort and never fails a job.
 8. **Retry policy:** each AI call is cut off after 60 s (a hung call counts as transient); backoff is
    ≈5 s then ≈10 s with jitter; the per-job timeout is 450 s (worst case ≈2 × (3 × 60 s + 15 s)).
+9. **Optional backup model.** If `GEMINI_FALLBACK_MODEL` is set, a transient failure on the primary model
+   moves the remaining attempts, and later stages of the same job, to the backup model (e.g. one version
+   behind) instead of re-trying a model that is already busy. The UI says "Switching to a backup AI model".
+   An unusable backup (retired / 404) is dropped and never masks the real "AI is busy" failure. Off by
+   default; the setting is opt-in because model names are account-specific. During testing the newest
+   models returned 503 while the previous versions answered in about 2.5 s.
 
 ## Consequences
 
