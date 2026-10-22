@@ -30,19 +30,16 @@
 - [x] Phase 5: Vite + React dashboard (all core pages), design system, TemplateSelect UI
 - [x] Phase 6: Webhook dispatcher, inbound adapters, audit logs — 17/17 tests passing
 
-### 🚧 Phase 7: BYOAK (Bring Your Own API Key) — see `docs/adr/005-byoak-key-management.md`
-- [x] Encrypt Gemini key at rest (Fernet, `ENCRYPTION_KEY`) + live validation on save
-- [x] `PUT/DELETE /api/v1/workspaces/current/gemini-key`, `PUT /api/v1/workspaces/current/platform-fallback` (paid-plan gated)
-- [x] Wire `ingest.py` → pipeline key/fallback routing; fix pipeline bugs blocking it (`_call_with_fallback`, `api_key` plumbing, `confidenceScores` write)
-- [x] Settings UI: AI Integration section (key save/remove, fallback toggle)
-- [x] Verified end-to-end against live Gemini
-- [ ] Record `api_key_source` on `DocumentLog` (workspace key vs. platform vs. mid-run fallback)
-- [ ] "Upgrade" flow for the free-plan fallback block (currently just a toast)
+### 🚧 Phase 7: BYOAK — see `docs/adr/005-byoak-key-management.md`
+- [x] Done: Fernet-encrypted key at rest + live validation, key/fallback endpoints (fallback paid-plan gated), pipeline key routing, Settings UI, verified against live Gemini.
+- [ ] Record `api_key_source` on `DocumentLog` (#12); "Upgrade" flow for the free-plan fallback block (#13, currently a toast).
 
 ### 📋 Phase 8: Product review fixes (2026-10-15 new-user walkthrough)
-Backlog tracked as GitHub issues, milestone "First-run experience": [#1–#13](https://github.com/ajaysajikumar8/Intelligent-Data-Extraction/issues). Labels: `bug`/`ux`/`product`/`tech-debt` + `p0`/`p1`/`p2`.
-- [x] #1 Logs/Submit now show the real failure reason (2026-10-21): `frontend/src/lib/failure.ts` `describeFailure()` normalises the 3 `validationErrors` shapes (`[{field,message}]`, `{error}`, `{pipeline_error}`). Verified in a real browser (Playwright, no-key workspace, light theme). Uncommitted, no frontend test runner yet.
-- [x] Submit toast now reflects status (SUCCESS / NEEDS_REVIEW / UNMATCHED / FAILED with real reason); verified in browser. Submit button disabled with no templates is correct (extraction needs a template) — only first-run guidance is missing → #2.
-- [ ] Found while verifying #1: Logs.tsx uses ~12 undefined CSS vars (`--bg-card`, `--text-color`… vs `--color-*` in tokens.css); React missing-`key` warning at Logs.tsx:125.
-- [ ] P0 blockers: #2 (first-run checklist), #14 (first-run access decision)
-- [ ] Private items (not in repo): pricing and billing, target customer and job, 3–5 user interviews, real extraction-quality test with a Gemini key on sample invoices
+Backlog = GitHub issues, milestone "First-run experience" ([#1–#14](https://github.com/ajaysajikumar8/Intelligent-Data-Extraction/issues)). Labels: `bug`/`ux`/`product`/`tech-debt` + `p0`/`p1`/`p2`.
+- [x] #1 real failure reason in Logs/Submit — pushed (dc74712), closed. `frontend/src/lib/failure.ts` `describeFailure()` maps `validationErrors` shapes.
+- [x] #4 (uncommitted) Submit keeps the result on page + JSON/CSV download (`lib/export.ts`, CSV formula-injection guard). Submit toast reflects status. Submit button disabled with no templates is correct (needs a template) — first-run guidance is #2.
+- [x] Async extraction + resilience (uncommitted) → `docs/adr/006-async-extraction-queue.md`. `POST /ingest` 202+PENDING; in-process queue; retry/backoff + 60s per-call timeout; classified failures (`failures.py`, `{error, code}`); live `progress` column (additive `prisma db push`); all terminal states fire webhooks; inbound adapters now pass BYOAK key/fallback (was a bug). Frontend: `useDocumentPolling`, `ProgressPanel`, shared `FailureDetails`, Logs auto-refresh, Submit resumes after reload. **API contract change** for API-key callers.
+- [x] QA (2026-10-22): backend 55/55, e2e 3/3, ~50 browser scenarios with a scripted fake AI (harness outside repo). Fixed: `GET /logs/{id}` dropped `progress`+`confidenceScores`; raw JSON/parser text on Submit; React key warning; undefined CSS vars in failure box. Real Gemini 503s ("high demand") during testing were handled as designed. A real SUCCESS through the new queue is still unconfirmed (see Next).
+- [ ] Test workspace "Verify All Workspace" is on the Pro plan (rollback: planId → free). Local dev DB holds ~15 throwaway QA users/workspaces.
+- [ ] Open: P0 #2 (first-run checklist), #14 (first-run access); no plan-change path (billing unbuilt); dashboard unusable on phones (fixed 240px sidebar, ~88–107px overflow at 390px) — file an issue; `docs/architecture.md` has local `file:///` paths (public repo); webhook URLs allow internal hosts (SSRF risk).
+- [ ] Private items (not in repo): pricing/billing, target customer, 3–5 user interviews, real extraction-quality test on sample invoices.
