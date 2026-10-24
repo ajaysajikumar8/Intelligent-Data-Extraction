@@ -85,10 +85,18 @@ async function request<T>(
     const fieldErrors: Record<string, string> = {}
     try {
       const body = await response.json() as {
-        detail?: string | { msg: string; loc?: (string | number)[] }[]
+        detail?: string | { msg: string; loc?: (string | number)[] }[] | { message?: string; errors?: { field?: string | number; message?: string }[] }
       }
       if (typeof body.detail === 'string') {
         detail = body.detail
+      } else if (body.detail && !Array.isArray(body.detail)) {
+        // e.g. POST /logs/{id}/correct: { message, errors: [{ field, message }] }
+        detail = body.detail.message ?? detail
+        for (const err of body.detail.errors ?? []) {
+          if (err.field !== undefined && typeof err.message === 'string' && !(String(err.field) in fieldErrors)) {
+            fieldErrors[String(err.field)] = err.message
+          }
+        }
       } else if (Array.isArray(body.detail)) {
         detail = body.detail.map((d) => d.msg).join(' ')
         for (const d of body.detail) {

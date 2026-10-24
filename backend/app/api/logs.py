@@ -14,6 +14,8 @@ Routes
 Authentication: Bearer JWT or X-API-Key.
 """
 
+import asyncio
+import json as json_lib
 import logging
 from datetime import datetime, timezone
 
@@ -109,39 +111,46 @@ async def correct_document_extraction(
             detail={"message": "Corrected JSON violates template schema", "errors": errors},
         )
 
-    # 2. Record the correction for prompt injection
-    # Upsert in case it was corrected multiple times (one correction per document)
-    import json as json_lib
-    
-    await db.extractioncorrection.upsert(
-        where={"documentLogId": doc_log.id},
-        data={
-            "create": {
-                "documentLogId": doc_log.id,
-                "templateId": doc_log.template.id,
-                "originalJson": json_lib.dumps(doc_log.extractedJson) if doc_log.extractedJson else "{}",
-                "correctedJson": json_lib.dumps(validated_data),
-                "templateVersion": doc_log.template.version,
-            },
-            "update": {
-                "correctedJson": json_lib.dumps(validated_data),
-                "templateVersion": doc_log.template.version,
-            }
-        }
-    )
-
-    # 3. Update the DocumentLog
-    import time
-    import asyncio
-    from prisma import Json
-
-    updated_log = await db.documentlog.update(
-        where={"id": doc_log.id},
+    # 2. Only a document waiting for review can be approved or corrected, and only once: the
+    # status flip is the claim, so a double-click or a second reviewer cannot dispatch the
+    # SUCCESS webhook twice.
+    claimed = await db.documentlog.update_many(
+        where={"id": doc_log.id, "workspaceId": workspace.id, "status": "NEEDS_REVIEW"},
         data={
             "status": "SUCCESS",
-            "extractedJson": Json(validated_data), # type: ignore[arg-type]
-            "validationErrors": None,
+            "extractedJson": Json(validated_data),  # type: ignore[arg-type]
+            "validationErrors": Json(None),  # type: ignore[arg-type]
         },
+    )
+    if not claimed:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This document is no longer waiting for review.",
+        )
+
+    # 3. Record the correction so later extractions on this template can learn from it.
+    # Skipped when the reviewer approved the values as they are: an "original == corrected"
+    # example teaches nothing and would only use up one of the few prompt slots.
+    if validated_data != doc_log.extractedJson:
+        await db.extractioncorrection.upsert(
+            where={"documentLogId": doc_log.id},
+            data={
+                "create": {
+                    "documentLogId": doc_log.id,
+                    "templateId": doc_log.template.id,
+                    "originalJson": json_lib.dumps(doc_log.extractedJson) if doc_log.extractedJson else "{}",
+                    "correctedJson": json_lib.dumps(validated_data),
+                    "templateVersion": doc_log.template.version,
+                },
+                "update": {
+                    "correctedJson": json_lib.dumps(validated_data),
+                    "templateVersion": doc_log.template.version,
+                },
+            },
+        )
+
+    updated_log = await db.documentlog.find_unique(
+        where={"id": doc_log.id},
         include={"webhookDeliveries": True},
     )
 

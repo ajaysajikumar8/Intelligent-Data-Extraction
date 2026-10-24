@@ -1,15 +1,15 @@
 import { Fragment, useEffect, useState } from 'react'
 import { ChevronDown, ChevronRight, Webhook, FileText, CheckCircle2, XCircle, Download, FileQuestion } from 'lucide-react'
-import { ingest, logs as logsApi } from '../lib/api'
-import type { DocumentLogResponse, DocumentLogDetailResponse, ExtractionStatus, Source } from '../lib/types'
+import { ingest, logs as logsApi, templates as templatesApi } from '../lib/api'
+import type { DocumentLogResponse, DocumentLogDetailResponse, ExtractionStatus, Source, TemplateResponse } from '../lib/types'
 import { StatusBadge, SourceBadge } from '../components/ui/Badge'
 import { SkeletonRow } from '../components/ui/Skeleton'
 import { Drawer } from '../components/ui/Drawer'
 import { Button } from '../components/ui/Button'
-import toast from 'react-hot-toast'
 import { describeFailure } from '../lib/failure'
 import { FailureDetails } from '../components/ui/FailureDetails'
 import { RetryAction } from '../components/ui/RetryAction'
+import { ReviewForm } from '../components/ReviewForm'
 import { exportLogsAsCsv, exportLogsAsJson } from '../lib/export'
 import { isInFlight } from '../lib/status'
 import { progressHint } from '../lib/progress'
@@ -29,10 +29,9 @@ export function Logs() {
   const [filterStatus, setFilterStatus] = useState<ExtractionStatus | ''>('')
   const [filterSource, setFilterSource] = useState<Source | ''>('')
   const [expanded, setExpanded] = useState<string | null>(null)
-  
-  const [editingLogId, setEditingLogId] = useState<string | null>(null)
-  const [editValue, setEditValue] = useState<string>('')
-  const [isSubmittingCorrection, setIsSubmittingCorrection] = useState(false)
+  // Loaded the first time a NEEDS_REVIEW document is opened: the review form needs field types.
+  const [templateList, setTemplateList] = useState<TemplateResponse[] | null>(null)
+
 
   useEffect(() => {
     setLoading(true)
@@ -73,6 +72,17 @@ export function Logs() {
     }
   }, [logs, expanded, details])
 
+  const openStatus = expanded ? details[expanded]?.status : undefined
+  useEffect(() => {
+    if (openStatus !== 'NEEDS_REVIEW' || templateList) return
+    templatesApi.list().then(setTemplateList).catch(() => setTemplateList([]))
+  }, [openStatus, templateList])
+
+  const handleCorrected = (updated: DocumentLogDetailResponse) => {
+    setDetails((prev) => ({ ...prev, [updated.id]: updated }))
+    setLogs((prev) => prev.map((l) => (l.id === updated.id ? { ...l, status: updated.status, extractedJson: updated.extractedJson } : l)))
+  }
+
   const handleRetried = (updated: DocumentLogResponse) => {
     setLogs((prev) => prev.map((l) => (l.id === updated.id ? updated : l)))
     setDetails((prev) => ({ ...prev, [updated.id]: { ...updated, webhookDeliveries: prev[updated.id]?.webhookDeliveries ?? [] } }))
@@ -80,26 +90,8 @@ export function Logs() {
 
   const toggle = (id: string) => {
     setExpanded((prev) => (prev === id ? null : id))
-    setEditingLogId(null) // reset editing state
     if (!details[id] && expanded !== id) {
       logsApi.get(id).then((data) => setDetails((prev) => ({ ...prev, [id]: data })))
-    }
-  }
-
-  const handleSubmitCorrection = async (logId: string) => {
-    try {
-      setIsSubmittingCorrection(true)
-      const parsed = JSON.parse(editValue)
-      const updatedData = await logsApi.correct(logId, parsed)
-      
-      setDetails(prev => ({ ...prev, [logId]: updatedData }))
-      setLogs(prev => prev.map(log => log.id === logId ? { ...log, status: 'SUCCESS' } : log))
-      setEditingLogId(null)
-      toast.success('Correction applied!')
-    } catch (e: any) {
-      toast.error('Failed to correct: ' + (e.message || 'Validation error'))
-    } finally {
-      setIsSubmittingCorrection(false)
     }
   }
 
@@ -266,6 +258,17 @@ export function Logs() {
                 </div>
                 {isInFlight(details[expanded].status) ? (
                   <ProgressPanel log={details[expanded]} />
+                ) : details[expanded].status === 'NEEDS_REVIEW' && details[expanded].extractedJson && !Array.isArray(details[expanded].extractedJson) ? (
+                  templateList ? (
+                    <ReviewForm
+                      key={details[expanded].id}
+                      log={details[expanded]}
+                      schema={templateList.find((t) => t.id === details[expanded!].templateId)?.schema ?? null}
+                      onSaved={handleCorrected}
+                    />
+                  ) : (
+                    <div className={styles.detailLoading}>Loading review form...</div>
+                  )
                 ) : details[expanded].extractedJson ? (
                   <div className={styles.jsonContainer}>
                     {typeof details[expanded].extractedJson === 'object' && !Array.isArray(details[expanded].extractedJson) ? (
@@ -299,34 +302,6 @@ export function Logs() {
                       <pre className={styles.json}>
                         {JSON.stringify(details[expanded].extractedJson, null, 2)}
                       </pre>
-                    )}
-                    {details[expanded].status === 'NEEDS_REVIEW' && editingLogId !== expanded && (
-                      <div style={{ marginTop: '16px', display: 'flex', justifyContent: 'flex-end' }}>
-                        <Button 
-                          onClick={() => {
-                            setEditValue(JSON.stringify(details[expanded!].extractedJson, null, 2))
-                            setEditingLogId(expanded)
-                          }}
-                        >
-                          Correct Extraction
-                        </Button>
-                      </div>
-                    )}
-                    {editingLogId === expanded && (
-                      <div style={{ marginTop: '16px', borderTop: '1px solid var(--border-color)', paddingTop: '16px' }}>
-                        <p style={{ marginBottom: '8px', fontWeight: 500 }}>Fix JSON and Submit Correction:</p>
-                        <textarea 
-                          value={editValue} 
-                          onChange={e => setEditValue(e.target.value)}
-                          style={{ width: '100%', height: '200px', fontFamily: 'monospace', padding: '12px', borderRadius: '6px', border: '1px solid var(--border-color)', background: 'var(--bg-body)', color: 'var(--text-color)' }}
-                        />
-                        <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '12px' }}>
-                          <Button variant="ghost" onClick={() => setEditingLogId(null)}>Cancel</Button>
-                          <Button onClick={() => handleSubmitCorrection(expanded!)} loading={isSubmittingCorrection}>
-                            Submit Correction
-                          </Button>
-                        </div>
-                      </div>
                     )}
                   </div>
                 ) : details[expanded].status === 'FAILED' && describeFailure(details[expanded].validationErrors) ? (
