@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { ArrowUpRight, CheckCircle2, FileText, Layers, XCircle } from 'lucide-react'
 import { ingest, templates, workspaces } from '../lib/api'
-import { setWorkspace } from '../lib/auth'
+import { getUser, setWorkspace } from '../lib/auth'
 import type { DocumentLogResponse, TemplateResponse, WorkspaceResponse } from '../lib/types'
 import { StatusBadge, SourceBadge } from '../components/ui/Badge'
 import { SkeletonCard, SkeletonRow } from '../components/ui/Skeleton'
@@ -69,6 +69,7 @@ export function Dashboard() {
           hasExtraction={logs.length > 0}
           hasOwnKey={ws.geminiApiKeySet}
           trialRemaining={ws.trialExtractionsRemaining}
+          emailVerified={Boolean(getUser()?.emailVerifiedAt)}
         />
       )}
 

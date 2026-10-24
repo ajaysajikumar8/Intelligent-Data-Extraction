@@ -250,6 +250,8 @@ export function Settings() {
             <p className={styles.rowDesc}>
               {ws?.geminiApiKeySet
                 ? 'A custom key is configured. Extractions use it first.'
+                : !getUser()?.emailVerifiedAt && ws && ws.trialExtractionsRemaining === 0
+                  ? 'No custom key — verify your email to unlock your free trial extractions, or add your own key.'
                 : ws && ws.trialExtractionsRemaining > 0
                   ? `No custom key — ${ws.trialExtractionsRemaining} free trial ${ws.trialExtractionsRemaining === 1 ? 'extraction' : 'extractions'} left on the platform key. Add your key to keep extracting after that.`
                   : 'No custom key — extractions are blocked until you add one (or enable fallback on a paid plan).'}

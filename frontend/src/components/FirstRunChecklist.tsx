@@ -7,6 +7,8 @@ interface Props {
   hasExtraction: boolean
   hasOwnKey: boolean
   trialRemaining: number
+  /** Trial credits are granted on email verification, so an unverified workspace has none yet. */
+  emailVerified: boolean
 }
 
 interface Step {
@@ -23,7 +25,7 @@ interface Step {
  * extractions, key) rather than stored, so it can never drift, and the card disappears once
  * everything is done.
  */
-export function FirstRunChecklist({ hasTemplate, hasExtraction, hasOwnKey, trialRemaining }: Props) {
+export function FirstRunChecklist({ hasTemplate, hasExtraction, hasOwnKey, trialRemaining, emailVerified }: Props) {
   const needsKeyNow = !hasOwnKey && trialRemaining <= 0
 
   const keyStep: Step = {
@@ -31,7 +33,9 @@ export function FirstRunChecklist({ hasTemplate, hasExtraction, hasOwnKey, trial
     title: 'Add your Gemini API key',
     detail: hasOwnKey
       ? 'Your own key is used for every extraction.'
-      : needsKeyNow
+      : !emailVerified
+        ? 'Verify your email to unlock your free extractions — or add your own key to start right away.'
+        : needsKeyNow
         ? 'Required before you can extract — your free trial is used up.'
         : `${trialRemaining} free ${trialRemaining === 1 ? 'extraction' : 'extractions'} left. Add your own key to keep going afterwards.`,
     to: '/settings',

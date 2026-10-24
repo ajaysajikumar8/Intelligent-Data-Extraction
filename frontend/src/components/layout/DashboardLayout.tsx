@@ -1,5 +1,6 @@
 import { Outlet } from 'react-router-dom'
 import { Sidebar } from './Sidebar'
+import { VerifyEmailBanner } from './VerifyEmailBanner'
 import styles from './DashboardLayout.module.css'
 
 /**
@@ -11,6 +12,7 @@ export function DashboardLayout() {
     <div className={styles.layout}>
       <Sidebar />
       <main className={styles.main}>
+        <VerifyEmailBanner />
         <div className={styles.content}>
           <Outlet />
         </div>

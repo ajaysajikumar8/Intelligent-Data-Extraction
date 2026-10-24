@@ -32,7 +32,14 @@ export interface UserResponse {
   workspaceId: string
   role: Role
   isActive: boolean
+  /** null until the address is confirmed via the emailed link; trial credits unlock on verify. */
+  emailVerifiedAt: string | null
   createdAt: string
+}
+
+export interface VerifyEmailResponse {
+  status: string
+  trialExtractionsGranted: number
 }
 
 export interface PlanResponse {

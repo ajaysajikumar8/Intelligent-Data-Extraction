@@ -3,6 +3,7 @@ import { DashboardLayout } from './components/layout/DashboardLayout'
 import { ProtectedRoute } from './components/layout/ProtectedRoute'
 import { Login } from './pages/Login'
 import { Signup } from './pages/Signup'
+import { VerifyEmail } from './pages/VerifyEmail'
 import { Dashboard } from './pages/Dashboard'
 import { Submit } from './pages/Submit'
 import { Logs } from './pages/Logs'
@@ -17,6 +18,7 @@ export function App() {
       {/* Public routes */}
       <Route path="/login"  element={<Login />} />
       <Route path="/signup" element={<Signup />} />
+      <Route path="/verify-email" element={<VerifyEmail />} />
 
       {/* Protected routes — require auth token */}
       <Route element={<ProtectedRoute />}>

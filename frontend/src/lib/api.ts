@@ -21,6 +21,7 @@ import type {
   TemplateResponse,
   TemplateUpdate,
   TokenResponse,
+  VerifyEmailResponse,
   WebhookCreate,
   WebhookDeliveryResponse,
   WebhookResponse,
@@ -128,6 +129,17 @@ export const auth = {
     }),
 
   me: () => request<TokenResponse>('/auth/me'),
+
+  verifyEmail: (token: string) =>
+    request<VerifyEmailResponse>('/auth/verify-email', {
+      method: 'POST',
+      body: JSON.stringify({ token }),
+    }),
+
+  resendVerification: () =>
+    request<{ status: 'sent' | 'already_verified' }>('/auth/resend-verification', {
+      method: 'POST',
+    }),
 }
 
 // ── Workspace endpoints ────────────────────────────────────────────────────
