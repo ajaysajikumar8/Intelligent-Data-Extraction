@@ -35,6 +35,7 @@
 - TypeScript: strict mode, no `any`.
 - Git: conventional commits (`feat:`, `fix:`, `chore:`, `docs:`).
 - Never hardcode secrets.
+- Database: schema changes are Prisma migrations (`prisma migrate dev --name x`, commit the SQL, see `docs/adr/014-prisma-migrations.md`). Never `prisma db push` / `migrate reset` outside a disposable local DB.
 
 ## Public Repo Rules
 

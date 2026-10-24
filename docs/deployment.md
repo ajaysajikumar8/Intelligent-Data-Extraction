@@ -11,7 +11,7 @@ startup when `APP_ENV=production`.
 - [ ] Verify a sending domain in Resend (SPF/DKIM), then set `RESEND_API_KEY` and `EMAIL_FROM` *(you)*. Without them nobody can
       verify an email, so nobody gets trial credits.
 - [ ] Set `TRUSTED_PROXY_HOPS=1` on Render/Railway (the number of reverse proxies in front of the app).
-- [ ] Run the [database steps](#database-first-deploy-and-schema-changes) against the production database *(you)*.
+- [ ] Run `prisma migrate deploy && python -m app.db.seed` against the production database, with a snapshot taken first ([database migrations](#database-migrations)) *(you)*.
 - [ ] Restrict outbound traffic from the API service ([egress restrictions](#egress-restrictions-ssrf-defence-in-depth), issue #20) *(you)*.
 - [ ] Set up [monitoring and alerts](#monitoring-and-alerts) *(you)*.
 - [ ] Remove any QA overrides from the environment (`SIGNUP_LIMIT_PER_*` above their defaults, `TRIAL_EXTRACTIONS` raised for testing).
@@ -77,25 +77,42 @@ limits are above their defaults. Messages never contain the values.
 If `APP_ENV` is *not* `production` but a hosted-platform variable (`RENDER`, `RAILWAY_ENVIRONMENT`, `FLY_APP_NAME`, `VERCEL`) is present,
 the app logs a warning that the checks were skipped. `GET /health` reports the active `environment`.
 
-## Database: first deploy and schema changes
+## Database: migrations
 
-The schema lives in `backend/prisma/schema.prisma`. There is **no migration history** in the repo: the project uses `prisma db push`.
+The schema lives in `backend/prisma/schema.prisma`. Every change to it is recorded as a **migration**: a numbered SQL file in
+`backend/prisma/migrations/` that is committed to git (see [ADR-014](adr/014-prisma-migrations.md)). `0_init` is the baseline of the
+whole schema at the time migrations were introduced. Prisma records which migrations a database has applied in its `_prisma_migrations` table.
 
-First deploy of a new database (run from `backend/`, with `DATABASE_URL` pointing at it):
+**Changing the schema (development):**
 
-1. `prisma db push`: creates the tables.
-2. `python -m app.db.seed`: inserts the plan tiers (idempotent upserts). The app refuses to boot until a `free` plan exists.
+1. Edit `schema.prisma`.
+2. From `backend/`: `prisma migrate dev --name short_description`. This writes the SQL file, applies it to your dev database and regenerates
+   the client. (It needs a *shadow database*, so the local Postgres user needs permission to create databases.)
+3. **Read the generated SQL** before committing. A column rename shows up as drop + add, which loses data; edit the SQL by hand if so.
+4. Commit the schema change and the new migration folder together.
 
-The build must also generate the Python Prisma client: `pip install -r requirements.txt && prisma generate` (without it the app cannot
-import `prisma`'s generated models).
+**Applying to a deployed database:** `prisma migrate deploy`. It applies only the pending migrations, never prompts, never resets and never
+drops anything that is not in a migration. Run it as the platform's pre-deploy / release command, **before** the new code starts
+(Render: *Pre-Deploy Command*), together with the idempotent seed:
 
-Every later schema change (e.g. ADR-013 added `DocumentLog.apiKeySource` / `modelUsed`) must be applied to production **before** the code
-that uses it is deployed. Additive changes (new nullable columns, new tables) are safe with `prisma db push`. Never pass
-`--accept-data-loss` against production, and take a database backup/snapshot first.
+```
+prisma migrate deploy && python -m app.db.seed
+```
 
-**Recommendation before the first customer data lands:** switch production to real migrations (`prisma migrate`): a baseline from the current
-schema, then reviewed, versioned SQL per change with a rollback plan. `db push` has no history and no rollback, and a destructive change
-(dropping or retyping a column) can lose data. Do this while the production database is still empty.
+On a brand-new database that creates everything from `0_init` onward; the app refuses to boot until the seed has inserted the `free` plan.
+The build must also generate the Python client: `pip install -r requirements.txt && prisma generate`.
+
+**Rules:**
+
+- Never run `prisma db push` or `prisma migrate reset` against production (no history, can drop data).
+- Take a database snapshot/backup before every deploy that contains a migration.
+- Prisma has no "down" migrations. To undo a change, write a new forward migration. For risky changes use *expand, then contract*: deploy
+  the additive change and code that works with both shapes first, and remove the old column in a later migration.
+- If `prisma migrate deploy` fails halfway, do not edit the database by hand to "fix" it: read `prisma migrate status`, then either
+  `prisma migrate resolve --rolled-back <name>` after repairing, or restore the snapshot.
+- Adopting migrations on an existing database that was created with `db push` is done once with `prisma migrate resolve --applied 0_init`
+  (already done on the dev database), after confirming `prisma migrate diff --from-schema-datasource prisma/schema.prisma
+  --to-schema-datamodel prisma/schema.prisma --exit-code` reports no difference.
 
 ## Egress restrictions: SSRF defence in depth
 
@@ -168,10 +185,11 @@ GROUP BY 1 ORDER BY 2 DESC;
 1. Create a **Web Service** (Python) → connect repo → set root to `backend/`
 2. Build command: `pip install -r requirements.txt && prisma generate`
 3. Start command: `uvicorn app.main:app --host 0.0.0.0 --port $PORT` (a single instance: see the known limits above)
-4. Set the [production variables](#production-environment-variables), and run the [database steps](#database-first-deploy-and-schema-changes) once
-5. Create a **Static Site** → connect repo → set root to `frontend/`
-6. Build command: `npm install && npm run build`
-7. Publish directory: `dist`
+4. Pre-Deploy Command: `prisma migrate deploy && python -m app.db.seed` ([database migrations](#database-migrations))
+5. Set the [production variables](#production-environment-variables)
+6. Create a **Static Site** → connect repo → set root to `frontend/`
+7. Build command: `npm install && npm run build`
+8. Publish directory: `dist`
 
 ## Railway
 
