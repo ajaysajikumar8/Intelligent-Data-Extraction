@@ -1,9 +1,9 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { AlertTriangle, Check, Copy, Download, ExternalLink, FileUp, GitMerge, Plus, Send, Sparkles, Upload, X } from 'lucide-react'
 import toast from 'react-hot-toast'
-import { ingest, logs, templates } from '../lib/api'
-import type { DocumentLogResponse, TemplateResponse } from '../lib/types'
+import { ingest, logs, templates, workspaces } from '../lib/api'
+import type { DocumentLogResponse, TemplateResponse, WorkspaceResponse } from '../lib/types'
 import { Button } from '../components/ui/Button'
 import { Textarea } from '../components/ui/Input'
 import { StatusBadge } from '../components/ui/Badge'
@@ -11,7 +11,7 @@ import { describeFailure } from '../lib/failure'
 import { isInFlight } from '../lib/status'
 import { useDocumentPolling } from '../hooks/useDocumentPolling'
 import { useBatchSubmit } from '../hooks/useBatchSubmit'
-import { MAX_BATCH_FILES, mergeFiles } from '../lib/batch'
+import { MAX_BATCH_FILES, mergeFiles, trialLimit } from '../lib/batch'
 import { BatchPanel } from '../components/ui/BatchPanel'
 import { ProgressPanel } from '../components/ui/ProgressPanel'
 import { FailureDetails } from '../components/ui/FailureDetails'
@@ -65,6 +65,7 @@ export function Submit() {
   // One file keeps the single-document flow (optionally with text); two or more run as a batch.
   const [files, setFiles] = useState<File[]>([])
   const batch = useBatchSubmit()
+  const [workspace, setWorkspace] = useState<WorkspaceResponse | null>(null)
   const [isDragging, setIsDragging] = useState(false)
   const [loading, setLoading] = useState(false)
   // `submitted` is the PENDING log returned by POST /ingest; the queue then runs
@@ -76,9 +77,19 @@ export function Submit() {
   const isProcessing = stillRunning && !timedOut
   const [copied, setCopied] = useState(false)
   const isBatch = files.length > 1
+  // Free-trial workspaces can only run as many documents as they have credits left.
+  const creditLimit = trialLimit(workspace)
+  const batchRunnable = creditLimit === null ? files.length : Math.min(files.length, creditLimit)
+  const batchBlocked = isBatch && batchRunnable === 0
   const showBatchPanel = batch.items.length > 0
   const fileRef = useRef<HTMLInputElement>(null)
   const announcedId = useRef<string | null>(null)
+
+  const refreshWorkspace = useCallback(() => {
+    workspaces.get().then(setWorkspace).catch(() => {})
+  }, [])
+
+  useEffect(() => { refreshWorkspace() }, [refreshWorkspace])
 
   useEffect(() => {
     templates.list()
@@ -101,7 +112,8 @@ export function Submit() {
     if (!result || isInFlight(result.status) || announcedId.current === result.id) return
     announcedId.current = result.id
     announceResult(result)
-  }, [result])
+    refreshWorkspace() // a spent trial credit is refunded when the document fails
+  }, [result, refreshWorkspace])
 
   const activeTemplates = tmplList.filter((t) => t.isActive)
   const selectedTemplate = activeTemplates.find((t) => t.id === selectedTemplateId)
@@ -122,8 +134,10 @@ export function Submit() {
 
   const handleBatchSubmit = () => {
     setSubmitted(null); setCopied(false); rememberSubmission(null)
-    void batch.start(files, selectedTemplateId || undefined)
-    setFiles([])
+    const toRun = files.slice(0, batchRunnable)
+    // Files beyond the credit limit stay selected so they can be run once credits are available.
+    setFiles(files.slice(batchRunnable))
+    void batch.start(toRun, selectedTemplateId || undefined).then(refreshWorkspace)
   }
 
   const handleSubmit = async () => {
@@ -290,15 +304,30 @@ export function Submit() {
               onChange={(e) => { addFiles(Array.from(e.target.files ?? [])); e.target.value = '' }}
             />
 
+            {isBatch && creditLimit !== null && batchRunnable < files.length && (
+              <div className={styles.creditNotice} role="status">
+                <AlertTriangle size={14} />
+                <span>
+                  {creditLimit === 0
+                    ? 'You have no free extractions left. '
+                    : `You have ${creditLimit} free ${creditLimit === 1 ? 'extraction' : 'extractions'} left, so only the first ${creditLimit} of ${files.length} files will run. `}
+                  <Link to="/settings">
+                    {workspace && !workspace.geminiApiKeySet ? 'Add your Gemini API key' : 'Open Settings'}
+                  </Link>{' '}
+                  to process the rest.
+                </span>
+              </div>
+            )}
+
             <Button
               onClick={handleSubmit}
               loading={loading || isProcessing || batch.running}
-              disabled={isSubmitDisabled || (!rawText.trim() && files.length === 0)}
+              disabled={isSubmitDisabled || batchBlocked || (!rawText.trim() && files.length === 0)}
               size="lg"
               style={{ width: '100%', marginTop: '1rem' }}
             >
               <Send size={15} />
-              {isBatch ? `Run extraction on ${files.length} files` : 'Run extraction'}
+              {isBatch ? `Run extraction on ${batchRunnable === files.length ? files.length : `${batchRunnable} of ${files.length}`} files` : 'Run extraction'}
             </Button>
           </div>
         </div>

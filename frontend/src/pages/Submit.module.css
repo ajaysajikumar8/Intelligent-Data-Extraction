@@ -331,3 +331,19 @@
 .fileList { display: flex; flex-direction: column; gap: var(--space-2); width: 100%; min-width: 0; }
 .fileList .fileInfo { flex-direction: row; width: 100%; min-width: 0; }
 .fileList .fileName { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.creditNotice {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+  padding: var(--space-3);
+  font-size: var(--text-xs);
+  line-height: 1.5;
+  color: var(--color-text);
+  background-color: var(--color-warning-subtle);
+  border: 1px solid var(--color-warning);
+  border-radius: var(--radius-sm);
+}
+.creditNotice svg { color: var(--color-warning); flex-shrink: 0; margin-top: 2px; }
+.creditNotice a { color: var(--color-accent); }

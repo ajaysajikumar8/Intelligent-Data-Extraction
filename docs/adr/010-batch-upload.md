@@ -22,7 +22,12 @@ through the in-process queue (ADR 006), which holds uploaded bytes in memory and
    orphans) are ignored. It applies to `POST /ingest`; inbound adapters are not capped yet.
 4. **Capacity errors stop the batch.** A `429`/`503` marks every not-yet-submitted file "Not submitted"
    with the reason (monthly quota, workspace cap, queue full) instead of hammering the server.
-5. Text input is not used in batch mode; one file keeps the existing single/hybrid flow.
+5. **Trial-credit pre-check.** A workspace with no own key and no platform fallback can only run as many
+   documents as it has trial credits (`trialLimit` in `lib/batch.ts`). The Submit page warns, runs only the
+   first N files, and leaves the rest selected; at 0 credits the batch button is disabled. Credits are
+   re-read after each result because a failed document refunds its credit. The server remains the authority
+   (each job still spends a credit atomically), so a stale count can never overspend.
+6. Text input is not used in batch mode; one file keeps the existing single/hybrid flow.
 
 ## Consequences
 

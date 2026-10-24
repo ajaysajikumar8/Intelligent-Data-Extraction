@@ -1,7 +1,19 @@
+import type { WorkspaceResponse } from './types'
+
 /** Client-side limits for uploads. The server re-validates type and size on every file. */
 export const MAX_FILE_BYTES = 20 * 1024 * 1024
 export const MAX_BATCH_FILES = 20
 export const ACCEPTED_EXTENSIONS = ['.pdf', '.png', '.jpg', '.jpeg', '.webp']
+
+/**
+ * How many documents the workspace can run right now, or null when only the monthly plan quota
+ * (enforced by the server) limits it. Without an own key or platform fallback, each document
+ * spends one free-trial credit, so a larger batch would just fail with "No AI key configured".
+ */
+export function trialLimit(ws: Pick<WorkspaceResponse, 'geminiApiKeySet' | 'allowPlatformFallback' | 'trialExtractionsRemaining'> | null): number | null {
+  if (!ws || ws.geminiApiKeySet || ws.allowPlatformFallback) return null
+  return Math.max(0, ws.trialExtractionsRemaining)
+}
 
 export interface PickedFiles {
   accepted: File[]
