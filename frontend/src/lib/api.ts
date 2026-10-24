@@ -35,6 +35,8 @@ export class ApiError extends Error {
   constructor(
     public status: number,
     public detail: string,
+    /** Validation (422) messages keyed by request field, e.g. { email: '...' }. */
+    public fieldErrors: Record<string, string> = {},
   ) {
     super(detail)
     this.name = 'ApiError'
@@ -79,17 +81,24 @@ async function request<T>(
 
   if (!response.ok) {
     let detail = `HTTP ${response.status}`
+    const fieldErrors: Record<string, string> = {}
     try {
-      const body = await response.json() as { detail?: string | { msg: string }[] }
+      const body = await response.json() as {
+        detail?: string | { msg: string; loc?: (string | number)[] }[]
+      }
       if (typeof body.detail === 'string') {
         detail = body.detail
       } else if (Array.isArray(body.detail)) {
-        detail = body.detail.map((d) => d.msg).join(', ')
+        detail = body.detail.map((d) => d.msg).join(' ')
+        for (const d of body.detail) {
+          const field = d.loc?.[d.loc.length - 1]
+          if (typeof field === 'string' && !(field in fieldErrors)) fieldErrors[field] = d.msg
+        }
       }
     } catch {
       // ignore parse errors
     }
-    throw new ApiError(response.status, detail)
+    throw new ApiError(response.status, detail, fieldErrors)
   }
 
   // 204 No Content

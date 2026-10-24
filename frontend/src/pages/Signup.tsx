@@ -2,7 +2,7 @@ import { useState, type FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { Mail, Lock, User, Building2, Zap } from 'lucide-react'
 import toast from 'react-hot-toast'
-import { auth } from '../lib/api'
+import { ApiError, auth } from '../lib/api'
 import { saveSession } from '../lib/auth'
 import { Button } from '../components/ui/Button'
 import { Input } from '../components/ui/Input'
@@ -14,7 +14,9 @@ export function Signup() {
     email: '', password: '', name: '', workspaceName: '',
   })
   const [loading, setLoading] = useState(false)
-  const [error, setError] = useState('')
+  // Field-level messages (shown under the relevant input) vs. a form-level one (e.g. rate limit).
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
+  const [formError, setFormError] = useState('')
 
   const isEmailValid = form.email.includes('@')
   const isPasswordValid = form.password.length >= 8
@@ -27,14 +29,17 @@ export function Signup() {
   else if (!isPasswordValid) missingReq = 'Password must be at least 8 characters'
 
   const update = (field: keyof typeof form) =>
-    (e: React.ChangeEvent<HTMLInputElement>) =>
+    (e: React.ChangeEvent<HTMLInputElement>) => {
       setForm((prev) => ({ ...prev, [field]: e.target.value }))
+      setFieldErrors((prev) => (prev[field] ? { ...prev, [field]: '' } : prev))
+    }
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault()
-    setError('')
+    setFormError('')
+    setFieldErrors({})
     if (form.password.length < 8) {
-      setError('Password must be at least 8 characters.')
+      setFieldErrors({ password: 'Password must be at least 8 characters.' })
       return
     }
     setLoading(true)
@@ -50,8 +55,15 @@ export function Signup() {
       navigate('/dashboard', { replace: true })
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Signup failed'
-      setError(msg)
-      toast.error(msg)
+      if (err instanceof ApiError && Object.keys(err.fieldErrors).length > 0) {
+        setFieldErrors(err.fieldErrors)
+      } else if (err instanceof ApiError && err.status === 400) {
+        // Duplicate or disposable address: the problem is the email, so say so there.
+        setFieldErrors({ email: msg })
+      } else {
+        setFormError(msg)
+        toast.error(msg)
+      }
     } finally {
       setLoading(false)
     }
@@ -76,6 +88,7 @@ export function Signup() {
             value={form.name}
             onChange={update('name')}
             leftIcon={<User size={15} />}
+            error={fieldErrors.name}
             autoFocus
           />
           <Input
@@ -86,6 +99,7 @@ export function Signup() {
             value={form.workspaceName}
             onChange={update('workspaceName')}
             leftIcon={<Building2 size={15} />}
+            error={fieldErrors.workspaceName}
           />
           <Input
             label="Email"
@@ -96,6 +110,7 @@ export function Signup() {
             onChange={update('email')}
             leftIcon={<Mail size={15} />}
             required
+            error={fieldErrors.email}
           />
           <Input
             label="Password"
@@ -106,10 +121,16 @@ export function Signup() {
             onChange={update('password')}
             leftIcon={<Lock size={15} />}
             required
-            error={error}
+            error={fieldErrors.password}
           />
           
-          {!isFormValid && !error && (
+          {formError && (
+            <div role="alert" style={{ fontSize: '0.8rem', color: 'var(--color-error)', textAlign: 'center' }}>
+              {formError}
+            </div>
+          )}
+
+          {!isFormValid && !formError && (
             <div style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)', marginBottom: '0.5rem', textAlign: 'center' }}>
               {missingReq}
             </div>

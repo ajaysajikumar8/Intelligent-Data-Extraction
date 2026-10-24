@@ -19,6 +19,9 @@ export function Login() {
   const isPasswordValid = password.length > 0
   const isFormValid = isEmailValid && isPasswordValid
   
+  // Don't nag before the user has typed anything.
+  const touched = email !== '' || password !== ''
+
   let missingReq = ''
   if (!isEmailValid) missingReq = 'Valid email is required'
   else if (!isPasswordValid) missingReq = 'Password is required'
@@ -77,7 +80,7 @@ export function Login() {
             error={error}
           />
           
-          {!isFormValid && !error && (
+          {touched && !isFormValid && !error && (
             <div style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)', marginBottom: '0.5rem', textAlign: 'center' }}>
               {missingReq}
             </div>
