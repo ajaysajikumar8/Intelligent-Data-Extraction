@@ -4,7 +4,6 @@ import { Menu, Zap } from 'lucide-react'
 import { Sidebar } from './Sidebar'
 import { VerifyEmailBanner } from './VerifyEmailBanner'
 import { useMediaQuery } from '../../hooks/useMediaQuery'
-import { useFinishedDocs } from '../../hooks/useFinishedDocs'
 import { APP_NAME } from '../../lib/brand'
 import styles from './DashboardLayout.module.css'
 
@@ -18,7 +17,6 @@ export function DashboardLayout() {
   const [navOpen, setNavOpen] = useState(false)
   const menuBtnRef = useRef<HTMLButtonElement>(null)
   const { pathname } = useLocation()
-  const finishedDocs = useFinishedDocs(pathname.startsWith('/logs'))
 
   // Close the drawer on navigation, and when the viewport grows past the breakpoint.
   useEffect(() => { setNavOpen(false) }, [pathname, isMobile])
@@ -36,12 +34,11 @@ export function DashboardLayout() {
             ref={menuBtnRef}
             className={styles.menuBtn}
             onClick={() => setNavOpen(true)}
-            aria-label={finishedDocs > 0 ? `Open navigation menu, ${finishedDocs} finished ${finishedDocs === 1 ? 'document' : 'documents'}` : 'Open navigation menu'}
+            aria-label="Open navigation menu"
             aria-expanded={navOpen}
             aria-controls="app-sidebar"
           >
             <Menu size={20} />
-            {finishedDocs > 0 && <span className={styles.menuDot} aria-hidden="true" />}
           </button>
           <div className={styles.topbarBrand}>
             <span className={styles.topbarLogo}><Zap size={14} /></span>
@@ -54,7 +51,7 @@ export function DashboardLayout() {
         <div className={styles.scrim} onClick={closeNav} aria-hidden="true" />
       )}
 
-      <Sidebar id="app-sidebar" drawer={isMobile} open={navOpen} onClose={closeNav} finishedDocs={finishedDocs} />
+      <Sidebar id="app-sidebar" drawer={isMobile} open={navOpen} onClose={closeNav} />
 
       <main className={styles.main}>
         <VerifyEmailBanner />

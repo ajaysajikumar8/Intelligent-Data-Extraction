@@ -49,20 +49,7 @@
   cursor: pointer;
 }
 
-.menuBtn { position: relative; }
 .menuBtn:hover { background-color: var(--color-surface-2); }
-
-/* Unseen finished documents, visible while the drawer is closed */
-.menuDot {
-  position: absolute;
-  top: 9px;
-  right: 9px;
-  width: 9px;
-  height: 9px;
-  border-radius: var(--radius-full);
-  background-color: var(--color-accent);
-  border: 2px solid var(--color-sidebar-bg);
-}
 
 .topbarBrand {
   display: flex;

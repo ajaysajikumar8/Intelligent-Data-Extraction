@@ -16,7 +16,6 @@ import { BatchPanel } from '../components/ui/BatchPanel'
 import { ProgressPanel } from '../components/ui/ProgressPanel'
 import { FailureDetails } from '../components/ui/FailureDetails'
 import { RetryAction } from '../components/ui/RetryAction'
-import { unwatchDocuments, watchDocuments } from '../lib/watch'
 import { exportLogsAsCsv, exportLogsAsJson } from '../lib/export'
 import { SAMPLE_DOCUMENT } from '../lib/sample'
 import styles from './Submit.module.css'
@@ -115,7 +114,6 @@ export function Submit() {
   useEffect(() => {
     if (!result || isInFlight(result.status) || announcedId.current === result.id) return
     announcedId.current = result.id
-    unwatchDocuments([result.id]) // seen live, so no badge
     announceResult(result)
     refreshWorkspace() // a spent trial credit is refunded when the document fails
   }, [result, refreshWorkspace])
@@ -166,7 +164,6 @@ export function Submit() {
       })
       setSubmitted(res)
       rememberSubmission(res.id)
-      watchDocuments([res.id])
     } catch (e: unknown) {
       toast.error(e instanceof Error ? e.message : 'Submission failed')
     } finally {
@@ -180,7 +177,6 @@ export function Submit() {
     setSubmitted(log)
     setAttempt((n) => n + 1)
     rememberSubmission(log.id)
-    watchDocuments([log.id])
   }
 
   const handleCopyJson = () => {
