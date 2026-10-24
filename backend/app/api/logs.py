@@ -222,6 +222,8 @@ async def retry_failed_document(
             "validationErrors": Json(None),  # type: ignore[arg-type]
             "progress": Json(None),  # type: ignore[arg-type]
             "processingMs": None,
+            "apiKeySource": None,  # re-decided when the retry runs
+            "modelUsed": None,
             "createdAt": datetime.now(timezone.utc),
         },
     )

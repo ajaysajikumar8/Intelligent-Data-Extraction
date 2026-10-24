@@ -107,6 +107,7 @@ async def _run(job: dict, workspace: Workspace) -> None:
                     **job,
                     custom_api_key=access.custom_api_key,
                     allow_platform_fallback=access.allow_platform_fallback,
+                    key_source=access.key_source,
                 ),
                 timeout=timeout,
             )

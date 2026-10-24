@@ -20,6 +20,13 @@ class Source(str, Enum):
     WEBHOOK = "WEBHOOK"
 
 
+class ApiKeySource(str, Enum):
+    WORKSPACE = "WORKSPACE"
+    PLATFORM = "PLATFORM"
+    TRIAL_CREDIT = "TRIAL_CREDIT"
+    WORKSPACE_THEN_PLATFORM = "WORKSPACE_THEN_PLATFORM"
+
+
 class ExtractionStatus(str, Enum):
     PENDING = "PENDING"
     PROCESSING = "PROCESSING"
@@ -268,6 +275,8 @@ class DocumentLogResponse(BaseModel):
     validationErrors: list[Any] | dict[str, Any] | None = None
     processingMs: int | None = None
     progress: dict[str, Any] | None = None
+    apiKeySource: ApiKeySource | None = None
+    modelUsed: str | None = None
     createdAt: datetime
 
 

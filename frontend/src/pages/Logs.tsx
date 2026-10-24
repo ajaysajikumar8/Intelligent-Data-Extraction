@@ -11,7 +11,7 @@ import { FailureDetails } from '../components/ui/FailureDetails'
 import { RetryAction } from '../components/ui/RetryAction'
 import { ReviewForm } from '../components/ReviewForm'
 import { exportLogsAsCsv, exportLogsAsJson } from '../lib/export'
-import { isInFlight } from '../lib/status'
+import { isInFlight, KEY_SOURCE_LABELS } from '../lib/status'
 import { progressHint } from '../lib/progress'
 import { ProgressPanel } from '../components/ui/ProgressPanel'
 import styles from './Logs.module.css'
@@ -236,6 +236,18 @@ export function Logs() {
                   <span className={styles.infoKey}>Document ID</span>
                   <span className={styles.infoValue}>{details[expanded].id}</span>
                 </div>
+                {details[expanded].apiKeySource && (
+                  <div className={styles.infoRow}>
+                    <span className={styles.infoKey}>AI key used</span>
+                    <span className={styles.infoValue}>{KEY_SOURCE_LABELS[details[expanded].apiKeySource!]}</span>
+                  </div>
+                )}
+                {details[expanded].modelUsed && (
+                  <div className={styles.infoRow}>
+                    <span className={styles.infoKey}>AI model</span>
+                    <span className={styles.infoValue}>{details[expanded].modelUsed}</span>
+                  </div>
+                )}
                 {details[expanded].fileName && (
                   <div className={styles.infoRow}>
                     <span className={styles.infoKey}>File Name</span>

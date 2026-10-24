@@ -23,6 +23,14 @@ enum Role {
   MEMBER
 }
 
+// ApiKeySource — whose Gemini key paid for a document's extraction (see docs/adr/013)
+enum ApiKeySource {
+  WORKSPACE               // The workspace's own key (BYOAK)
+  PLATFORM                // The platform key, via paid-plan Platform Key Fallback
+  TRIAL_CREDIT            // The platform key, paid for with a free-trial credit
+  WORKSPACE_THEN_PLATFORM // Started on the workspace's key, hit its quota, finished on the platform key
+}
+
 // Source — how a document entered the pipeline
 enum Source {
   MANUAL   // User submitted via the dashboard (text paste or file upload)
@@ -192,6 +200,10 @@ model DocumentLog {
   // Live progress while PENDING/PROCESSING (stage, attempt, retrying…); null once terminal.
   // Written by the extraction pipeline, read by the dashboard — see docs/adr/006.
   progress         Json?
+  // Which key paid for the run, and the Gemini model of its last successful call.
+  // Null for documents that never reached the AI (no key, no template) and rows from before this was recorded.
+  apiKeySource     ApiKeySource?
+  modelUsed        String?
   createdAt        DateTime         @default(now())
 
   workspace         Workspace         @relation(fields: [workspaceId], references: [id])

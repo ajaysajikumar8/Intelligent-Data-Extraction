@@ -31,6 +31,15 @@ class AiAccess:
     allow_platform_fallback: bool
     trial_credit_held: bool = False
 
+    @property
+    def key_source(self) -> str | None:
+        """The `ApiKeySource` this route corresponds to (None = no usable key)."""
+        if self.custom_api_key:
+            return "WORKSPACE"
+        if self.trial_credit_held:
+            return "TRIAL_CREDIT"
+        return "PLATFORM" if self.allow_platform_fallback else None
+
 
 async def acquire(workspace: Workspace) -> AiAccess:
     """Resolve the key route for one job, spending a trial credit if that is what it takes."""

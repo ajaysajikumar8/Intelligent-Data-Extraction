@@ -126,6 +126,8 @@ export interface ExtractionProgress {
   usingBackupModel?: boolean
 }
 
+export type ApiKeySource = 'WORKSPACE' | 'PLATFORM' | 'TRIAL_CREDIT' | 'WORKSPACE_THEN_PLATFORM'
+
 export interface DocumentLogResponse {
   id: string
   workspaceId: string
@@ -142,6 +144,10 @@ export interface DocumentLogResponse {
   validationErrors: unknown[] | Record<string, unknown> | null
   processingMs: number | null
   progress: ExtractionProgress | null
+  /** Whose Gemini key paid for the run; null if it never reached the AI or predates tracking. */
+  apiKeySource: ApiKeySource | null
+  /** Gemini model of the last successful call. */
+  modelUsed: string | null
   createdAt: string
 }
 

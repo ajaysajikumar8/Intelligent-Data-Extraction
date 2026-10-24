@@ -79,6 +79,7 @@ async def run(
     target_template_id: str | None = None,
     custom_api_key: str | None = None,
     allow_platform_fallback: bool = False,
+    key_source: str | None = None,
 ) -> DocumentLog:
     """
     Execute the 3-stage extraction pipeline for a given DocumentLog record.
@@ -103,7 +104,7 @@ async def run(
     Returns the final DocumentLog record after updating status in the DB.
     """
     start_ms = time.monotonic()
-    router = _ModelRouter(backup=get_settings().GEMINI_FALLBACK_MODEL or None)
+    router = _ModelRouter(backup=get_settings().GEMINI_FALLBACK_MODEL or None, key_source=key_source)
 
     # ------------------------------------------------------------------
     # Resolve which API key to use
@@ -183,7 +184,7 @@ async def run(
 
             if matched_template is None:
                 logger.info("[%s] No template matched — marking UNMATCHED", doc_log_id)
-                return await _finish(doc_log_id, start_ms, "UNMATCHED")
+                return await _finish(doc_log_id, start_ms, "UNMATCHED", **_usage(router))
 
         logger.info(
             "[%s] Classified as template '%s' (%s)",
@@ -244,6 +245,7 @@ async def run(
                 start_ms,
                 "FAILED",
                 validationErrors=Json(payload),  # type: ignore[arg-type]
+                **_usage(router),
             )
 
         # Check confidence scores to determine status
@@ -260,6 +262,7 @@ async def run(
             final_status,
             extractedJson=Json(extracted_data),  # type: ignore[arg-type]
             confidenceScores=Json(confidence_scores if confidence_scores else None),  # type: ignore[arg-type]
+            **_usage(router),
         )
 
     except Exception as exc:  # noqa: BLE001
@@ -271,6 +274,7 @@ async def run(
             start_ms,
             "FAILED",
             validationErrors=Json(failure.to_json()),  # type: ignore[arg-type]
+            **_usage(router),
         )
 
 
@@ -290,11 +294,25 @@ class _ModelRouter:
 
     backup: str | None
     use_backup: bool = False
+    # Recorded on the DocumentLog when the job finishes (ADR-013): whose key paid, and which model
+    # answered last. `key_source` flips to WORKSPACE_THEN_PLATFORM if the workspace key hits its quota.
+    key_source: str | None = None
+    last_model: str | None = None
 
     @property
     def model(self) -> str | None:
         """Model override for the next call (None = the configured primary)."""
         return self.backup if self.use_backup else None
+
+
+def _usage(router: _ModelRouter) -> dict[str, Any]:
+    """`DocumentLog` fields recording which key and model a finished job used (omits unknowns)."""
+    usage: dict[str, Any] = {}
+    if router.key_source:
+        usage["apiKeySource"] = router.key_source
+    if router.last_model:
+        usage["modelUsed"] = router.last_model
+    return usage
 
 
 def _progress(
@@ -356,6 +374,7 @@ async def _call_with_fallback(
                 "[%s] Custom Gemini key quota exhausted — falling back to platform key",
                 doc_log_id,
             )
+            router.key_source = "WORKSPACE_THEN_PLATFORM"
             return await _with_retries(doc_log_id, stage, router, lambda model: fn(None, model))
         raise
 
@@ -381,6 +400,7 @@ async def _with_retries(
         model = router.model
         try:
             result = await asyncio.wait_for(call(model), timeout=_CALL_TIMEOUT_S)
+            router.last_model = model or get_settings().GEMINI_MODEL
             if model:
                 logger.info("[%s] %s completed on backup model '%s'", doc_log_id, stage, model)
             return result
