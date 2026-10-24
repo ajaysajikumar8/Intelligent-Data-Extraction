@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { ArrowUpRight, CheckCircle2, FileText, Layers, XCircle } from 'lucide-react'
-import { ingest, templates } from '../lib/api'
-import type { DocumentLogResponse, TemplateResponse } from '../lib/types'
+import { ingest, templates, workspaces } from '../lib/api'
+import { setWorkspace } from '../lib/auth'
+import type { DocumentLogResponse, TemplateResponse, WorkspaceResponse } from '../lib/types'
 import { StatusBadge, SourceBadge } from '../components/ui/Badge'
 import { SkeletonCard, SkeletonRow } from '../components/ui/Skeleton'
+import { FirstRunChecklist } from '../components/FirstRunChecklist'
 import styles from './Dashboard.module.css'
 
 interface Stat {
@@ -18,15 +20,22 @@ interface Stat {
 export function Dashboard() {
   const [logs, setLogs] = useState<DocumentLogResponse[]>([])
   const [tmpl, setTmpl] = useState<TemplateResponse[]>([])
+  const [ws, setWs] = useState<WorkspaceResponse | null>(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     Promise.all([
       ingest.list({ limit: 10 }),
       templates.list(),
-    ]).then(([l, t]) => {
+      // The checklist is optional: if this fails the dashboard still renders without it.
+      workspaces.get().catch(() => null),
+    ]).then(([l, t, w]) => {
       setLogs(l)
       setTmpl(t)
+      if (w) {
+        setWs(w)
+        setWorkspace(w) // keep the cached copy (trial balance, key state) fresh
+      }
     }).finally(() => setLoading(false))
   }, [])
 
@@ -53,6 +62,15 @@ export function Dashboard() {
           Submit document <ArrowUpRight size={15} />
         </Link>
       </div>
+
+      {!loading && ws && (
+        <FirstRunChecklist
+          hasTemplate={tmpl.length > 0}
+          hasExtraction={logs.length > 0}
+          hasOwnKey={ws.geminiApiKeySet}
+          trialRemaining={ws.trialExtractionsRemaining}
+        />
+      )}
 
       {/* Stat cards */}
       <div className={styles.statsGrid}>

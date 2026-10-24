@@ -58,6 +58,8 @@ export interface WorkspaceResponse {
   plan: PlanResponse
   geminiApiKeySet: boolean
   allowPlatformFallback: boolean
+  /** Free-trial extractions left on the platform key (used only while no own key is set). */
+  trialExtractionsRemaining: number
 }
 
 export interface TokenResponse {

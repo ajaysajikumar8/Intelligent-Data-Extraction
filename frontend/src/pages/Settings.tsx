@@ -33,6 +33,8 @@ export function Settings() {
 
   useEffect(() => {
     workspaces.listMembers().then(setMembers).finally(() => setLoadingMembers(false))
+    // The cached workspace can be stale (the trial balance changes with every extraction).
+    workspaces.get().then((fresh) => { setWs(fresh); setWorkspace(fresh) }).catch(() => {})
     webhooks.getInboundUrl().then(res => setInboundUrl(res.inboundUrl)).catch(() => {})
   }, [])
 
@@ -248,7 +250,9 @@ export function Settings() {
             <p className={styles.rowDesc}>
               {ws?.geminiApiKeySet
                 ? 'A custom key is configured. Extractions use it first.'
-                : 'No custom key — extractions use the platform key, if fallback is enabled.'}
+                : ws && ws.trialExtractionsRemaining > 0
+                  ? `No custom key — ${ws.trialExtractionsRemaining} free trial ${ws.trialExtractionsRemaining === 1 ? 'extraction' : 'extractions'} left on the platform key. Add your key to keep extracting after that.`
+                  : 'No custom key — extractions are blocked until you add one (or enable fallback on a paid plan).'}
             </p>
           </div>
           <div className={styles.fieldGroup}>

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { AlertTriangle, Check, Copy, Download, ExternalLink, FileUp, GitMerge, Plus, Send, Sparkles, Upload, X } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { ingest, logs, templates } from '../lib/api'
@@ -13,6 +13,7 @@ import { useDocumentPolling } from '../hooks/useDocumentPolling'
 import { ProgressPanel } from '../components/ui/ProgressPanel'
 import { FailureDetails } from '../components/ui/FailureDetails'
 import { exportLogsAsCsv, exportLogsAsJson } from '../lib/export'
+import { SAMPLE_DOCUMENT } from '../lib/sample'
 import styles from './Submit.module.css'
 
 import { TemplateSelect } from '../components/ui/TemplateSelect'
@@ -55,7 +56,9 @@ export function Submit() {
   const [tmplList, setTmplList] = useState<TemplateResponse[]>([])
   const [isLoadingTemplates, setIsLoadingTemplates] = useState(true)
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>('')
-  const [rawText, setRawText] = useState('')
+  // `?sample=1` (from the first-run checklist) pre-fills a realistic invoice to try.
+  const [searchParams] = useSearchParams()
+  const [rawText, setRawText] = useState(() => (searchParams.get('sample') ? SAMPLE_DOCUMENT : ''))
   const [file, setFile] = useState<File | null>(null)
   const [isDragging, setIsDragging] = useState(false)
   const [loading, setLoading] = useState(false)
