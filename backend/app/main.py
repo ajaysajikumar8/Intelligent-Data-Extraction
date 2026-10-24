@@ -90,7 +90,7 @@ async def health_check(settings: Settings = Depends(get_settings)) -> dict:
         "status": "ok" if db_connected else "degraded",
         "service": "intelligent-data-extraction",
         "version": app.version,
-        "environment": "development" if "localhost" in str(settings.FRONTEND_URL) else "production",
+        "environment": settings.APP_ENV,
         "database": "connected" if db_connected else "disconnected",
     }
 

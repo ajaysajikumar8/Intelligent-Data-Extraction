@@ -1,5 +1,8 @@
 import logging
+import os
 from functools import lru_cache
+from typing import Literal
+from urllib.parse import urlparse
 
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -24,7 +27,16 @@ class Settings(BaseSettings):
         env_file=".env",
         env_file_encoding="utf-8",
         case_sensitive=True,
+        # Validation errors must never echo the raw settings (they contain secrets such as the database URL).
+        hide_input_in_errors=True,
     )
+
+    # ------------------------------------------------------------------ #
+    # Environment. "production" turns on startup safety checks (see `production_problems`):
+    # the app refuses to start with placeholder secrets, no encryption key, no email setup, etc.
+    # Set APP_ENV=production on every real deployment.
+    # ------------------------------------------------------------------ #
+    APP_ENV: Literal["development", "production"] = "development"
 
     # ------------------------------------------------------------------ #
     # Database
@@ -145,13 +157,98 @@ class Settings(BaseSettings):
                 "Set them in backend/.env (local dev) or the platform dashboard (production)."
             )
 
-        if not self.ENCRYPTION_KEY or not self.ENCRYPTION_KEY.strip():
-            logger.warning(
-                "ENCRYPTION_KEY is not set — BYOAK Gemini keys will be stored as "
-                "plaintext. Fine for local dev; set it before any production deployment."
-            )
+        if self.APP_ENV == "production":
+            errors, warnings = production_problems(self)
+            for warning in warnings:
+                logger.warning("Production check: %s", warning)
+            if errors:
+                raise ValueError(
+                    "Refusing to start with APP_ENV=production. Fix these settings:\n  - "
+                    + "\n  - ".join(errors)
+                )
+        else:
+            if not self.ENCRYPTION_KEY or not self.ENCRYPTION_KEY.strip():
+                logger.warning(
+                    "ENCRYPTION_KEY is not set — BYOAK Gemini keys will be stored as "
+                    "plaintext. Fine for local dev; set it before any production deployment."
+                )
+            if any(os.environ.get(var) for var in _HOSTED_PLATFORM_ENV_VARS):
+                logger.warning(
+                    "This looks like a hosted platform but APP_ENV is not 'production', so the "
+                    "production safety checks are skipped. Set APP_ENV=production."
+                )
 
         return self
+
+
+# Environment variables hosted platforms set on their runtimes; used only to warn about a missing APP_ENV.
+_HOSTED_PLATFORM_ENV_VARS = ("RENDER", "RAILWAY_ENVIRONMENT", "RAILWAY_ENVIRONMENT_NAME", "FLY_APP_NAME", "VERCEL")
+
+# Defaults of the signup limits; a higher value in production usually means a leftover QA setting.
+_DEFAULT_SIGNUP_LIMIT_PER_IP = 5
+_DEFAULT_SIGNUP_LIMIT_PER_DOMAIN = 3
+
+
+def _is_local_url(url: str) -> bool:
+    host = (urlparse(url).hostname or "").lower()
+    return host in ("localhost", "127.0.0.1", "::1", "0.0.0.0") or host.endswith(".localhost")
+
+
+def production_problems(s: "Settings") -> tuple[list[str], list[str]]:
+    """
+    Settings that are unsafe or broken for a real deployment.
+
+    Returns (errors, warnings). Errors make startup fail when APP_ENV=production: each one is a
+    misconfiguration that silently breaks signup, weakens security, or exposes customer secrets.
+    Warnings are logged. Values themselves are never included in messages.
+    """
+    errors: list[str] = []
+    warnings: list[str] = []
+
+    if not s.ENCRYPTION_KEY or not s.ENCRYPTION_KEY.strip():
+        errors.append("ENCRYPTION_KEY is not set: customers' own Gemini keys would be stored unencrypted.")
+    else:
+        try:
+            from cryptography.fernet import Fernet
+
+            Fernet(s.ENCRYPTION_KEY.encode())
+        except Exception:  # noqa: BLE001 — any failure means the key is unusable
+            errors.append(
+                "ENCRYPTION_KEY is not a valid Fernet key "
+                "(generate one: python -c \"from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())\")."
+            )
+
+    secret = s.SECRET_KEY.strip()
+    if len(secret) < 32 or "change-in-production" in secret.lower() or secret.lower().startswith("your-"):
+        errors.append("SECRET_KEY is a placeholder or shorter than 32 characters: anyone could forge login tokens.")
+
+    if s.GEMINI_API_KEY.strip().lower().startswith("your-"):
+        errors.append("GEMINI_API_KEY is still the example placeholder.")
+
+    if s.WEBHOOK_ALLOW_PRIVATE_HOSTS:
+        errors.append("WEBHOOK_ALLOW_PRIVATE_HOSTS must be false: it disables the SSRF protection (ADR-007).")
+
+    for name in ("FRONTEND_URL", "API_BASE_URL"):
+        url = getattr(s, name)
+        if _is_local_url(url):
+            errors.append(f"{name} still points at localhost.")
+        elif not url.lower().startswith("https://"):
+            errors.append(f"{name} must use https.")
+
+    if not s.RESEND_API_KEY or not s.RESEND_API_KEY.strip():
+        errors.append("RESEND_API_KEY is not set: verification emails would only be logged, so nobody could verify or get trial credits.")
+    elif "resend.dev" in s.EMAIL_FROM.lower():
+        errors.append("EMAIL_FROM uses Resend's shared test sender, which only delivers to your own address. Use a verified domain.")
+
+    if s.TRUSTED_PROXY_HOPS == 0:
+        warnings.append(
+            "TRUSTED_PROXY_HOPS is 0: behind a reverse proxy (Render/Railway = 1) every user shares the proxy's IP "
+            "and the per-IP signup limit throttles everyone together."
+        )
+    if s.SIGNUP_LIMIT_PER_IP_PER_HOUR > _DEFAULT_SIGNUP_LIMIT_PER_IP or s.SIGNUP_LIMIT_PER_DOMAIN_PER_HOUR > _DEFAULT_SIGNUP_LIMIT_PER_DOMAIN:
+        warnings.append("Signup rate limits are above their defaults (leftover QA values?).")
+
+    return errors, warnings
 
 
 @lru_cache
