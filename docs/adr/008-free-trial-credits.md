@@ -2,6 +2,7 @@
 
 **Status:** Accepted
 **Date:** 2026-10-23
+**Amended:** credits are now granted on email verification, not at signup — see [ADR-009](009-email-verification-and-signup-limits.md).
 
 ## Context
 
