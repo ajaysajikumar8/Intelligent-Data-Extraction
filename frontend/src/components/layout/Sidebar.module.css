@@ -37,21 +37,10 @@
 }
 
 .brandName {
-  display: block;
   font-size: var(--text-sm);
   font-weight: var(--font-bold);
   color: var(--color-text);
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  line-height: 1;
-}
-
-.brandSub {
-  display: block;
-  font-size: var(--text-xs);
-  color: var(--color-text-subtle);
-  line-height: 1;
-  margin-top: 2px;
+  line-height: 1.25;
 }
 
 /* Nav */
@@ -168,4 +157,25 @@
 .logoutBtn:hover {
   background-color: var(--color-error-subtle);
   color: var(--color-error);
+}
+
+/* Mobile: off-canvas drawer (toggled from the top bar in DashboardLayout) */
+.drawer {
+  width: min(var(--sidebar-width), 85vw);
+  height: 100dvh;
+  transform: translateX(-100%);
+  visibility: hidden;
+  transition: transform 200ms ease, visibility 0s linear 200ms;
+  z-index: 200;
+}
+
+.drawerOpen {
+  transform: translateX(0);
+  visibility: visible;
+  transition: transform 200ms ease;
+  box-shadow: var(--shadow-lg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .drawer, .drawerOpen { transition: none; }
 }

@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react'
-import { Layers, Pencil, Plus, Trash2, Copy, BookOpen } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { Layers, Pencil, Plus, Trash2, Copy, BookOpen, Check } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { templates as tmplApi } from '../lib/api'
 import type { LibraryTemplateResponse, TemplateCreate, TemplateResponse, TemplateUpdate } from '../lib/types'
@@ -26,9 +26,21 @@ export function Templates() {
   const [form, setForm] = useState({ name: '', description: '', schema: '{\n  \n}' })
   const [schemaError, setSchemaError] = useState('')
 
-  const load = () => {
-    setLoading(true)
-    Promise.all([tmplApi.list(), tmplApi.getLibrary()])
+  const [addingSlug, setAddingSlug] = useState<string | null>(null)
+  const [highlightId, setHighlightId] = useState<string | null>(null)
+  const highlightRef = useRef<HTMLDivElement>(null)
+
+  // Library templates the workspace already has a copy of (matched by name).
+  const addedCounts = useMemo(() => {
+    const counts = new Map<string, number>()
+    list.forEach((t) => counts.set(t.name, (counts.get(t.name) ?? 0) + 1))
+    return counts
+  }, [list])
+
+  // `silent` refreshes in place without flashing the skeleton grid.
+  const load = (silent = false) => {
+    if (!silent) setLoading(true)
+    return Promise.all([tmplApi.list(), tmplApi.getLibrary()])
       .then(([myTemplates, libTemplates]) => {
         setList(myTemplates)
         setLibraryList(libTemplates)
@@ -37,6 +49,14 @@ export function Templates() {
   }
 
   useEffect(() => { load() }, [])
+
+  // Bring a freshly added template into view, then drop the highlight.
+  useEffect(() => {
+    if (!highlightId || activeTab !== 'my') return
+    highlightRef.current?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    const timer = setTimeout(() => setHighlightId(null), 2500)
+    return () => clearTimeout(timer)
+  }, [highlightId, activeTab, list])
 
   const openCreate = () => {
     setEditing(null)
@@ -92,13 +112,18 @@ export function Templates() {
   }
 
   const handleDuplicateLibrary = async (slug: string) => {
+    if (addingSlug) return
+    setAddingSlug(slug)
     try {
-      await tmplApi.duplicateFromLibrary(slug)
-      toast.success('Template added to your workspace')
+      const created = await tmplApi.duplicateFromLibrary(slug)
+      await load(true)
+      setHighlightId(created.id)
       setActiveTab('my')
-      load()
+      toast.success(`"${created.name}" added to My Templates`)
     } catch {
       toast.error('Failed to duplicate template')
+    } finally {
+      setAddingSlug(null)
     }
   }
 
@@ -152,7 +177,11 @@ export function Templates() {
         ) : (
           <div className={styles.grid}>
             {list.map((t) => (
-              <div key={t.id} className={[styles.card, !t.isActive ? styles.inactive : ''].filter(Boolean).join(' ')}>
+              <div
+                key={t.id}
+                ref={t.id === highlightId ? highlightRef : undefined}
+                className={[styles.card, !t.isActive ? styles.inactive : '', t.id === highlightId ? styles.highlight : ''].filter(Boolean).join(' ')}
+              >
                 <div className={styles.cardTop}>
                   <div className={styles.cardTitleRow}>
                     <span className={styles.cardName}>{t.name}</span>
@@ -184,7 +213,9 @@ export function Templates() {
         )
       ) : (
         <div className={styles.grid}>
-          {libraryList.map((t) => (
+          {libraryList.map((t) => {
+            const added = addedCounts.get(t.name) ?? 0
+            return (
             <div key={t.slug} className={styles.card}>
               <div className={styles.cardTop}>
                 <div className={styles.cardTitleRow}>
@@ -197,12 +228,22 @@ export function Templates() {
                 <span>{t.fieldCount} fields</span>
               </div>
               <div className={styles.cardActions}>
-                <Button variant="secondary" size="sm" onClick={() => handleDuplicateLibrary(t.slug)}>
-                  <Copy size={13} /> Add to my templates
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  loading={addingSlug === t.slug}
+                  disabled={addingSlug !== null}
+                  onClick={() => handleDuplicateLibrary(t.slug)}
+                >
+                  <Copy size={13} /> {added > 0 ? 'Add another copy' : 'Add to my templates'}
                 </Button>
+                {added > 0 && (
+                  <span className={styles.added}><Check size={13} /> In your templates</span>
+                )}
               </div>
             </div>
-          ))}
+            )
+          })}
         </div>
       )}
 
