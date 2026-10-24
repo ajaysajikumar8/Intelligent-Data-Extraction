@@ -9,6 +9,7 @@ Stage 2 extract, Stage 3 validate.
 All tests hit POST /api/v1/ingest/ — the single unified endpoint.
 """
 
+import asyncio
 import json
 import pytest
 from datetime import datetime, timedelta, timezone
@@ -357,3 +358,51 @@ async def test_ingest_allowed_below_in_flight_cap():
             data = await _ingest_and_wait(client, headers, {"rawInput": "invoice text"})
 
         assert data["status"] == "SUCCESS"
+
+
+# ---------------------------------------------------------------------------
+# Mixed batch: auto-detect classifies every document independently
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_auto_detect_routes_each_document_to_its_own_template():
+    """Two documents submitted together (no template picked) each end up on the right template."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        token, _, workspace_id, _, invoice_tmpl_id = await _signup_and_create_template(client)
+        headers = {"Authorization": f"Bearer {token}"}
+
+        resume = await client.post(
+            "/api/v1/templates",
+            json={
+                "name": "Resume Template",
+                "description": "Extracts candidate details from resumes.",
+                "schema": {"candidate_name": "string", "years_experience": "number"},
+            },
+            headers=headers,
+        )
+        assert resume.status_code == 201, resume.text
+        resume_tmpl_id = resume.json()["id"]
+
+        async def fake_gemini(prompt: str, **_: object) -> str:
+            if "document classification engine" in prompt:
+                return invoice_tmpl_id if "INVOICE" in prompt else resume_tmpl_id
+            if "invoice_number" in prompt:
+                return json.dumps({"vendor_name": "Acme", "invoice_number": "INV-1", "total_amount": 10})
+            return json.dumps({"candidate_name": "Jane Doe", "years_experience": 7})
+
+        with patch("app.services.gemini_service.generate_text", new=AsyncMock(side_effect=fake_gemini)):
+            responses = await asyncio.gather(
+                client.post("/api/v1/ingest/", data={"rawInput": "INVOICE from Acme, total 10"}, headers=headers),
+                client.post("/api/v1/ingest/", data={"rawInput": "Jane Doe, senior engineer, 7 years"}, headers=headers),
+            )
+            assert [r.status_code for r in responses] == [202, 202]
+            await extraction_queue.wait_idle()
+
+        invoice_log, resume_log = [
+            (await client.get(f"/api/v1/logs/{r.json()['id']}", headers=headers)).json() for r in responses
+        ]
+        assert invoice_log["status"] == "SUCCESS" and invoice_log["templateId"] == invoice_tmpl_id
+        assert invoice_log["extractedJson"]["invoice_number"] == "INV-1"
+        assert resume_log["status"] == "SUCCESS" and resume_log["templateId"] == resume_tmpl_id
+        assert resume_log["extractedJson"]["candidate_name"] == "Jane Doe"
