@@ -179,3 +179,17 @@
 @media (prefers-reduced-motion: reduce) {
   .drawer, .drawerOpen { transition: none; }
 }
+
+/* Count of documents that finished while the user was away (on the Logs item) */
+.badge {
+  margin-left: auto;
+  min-width: 20px;
+  padding: 1px 6px;
+  font-size: var(--text-xs);
+  font-weight: var(--font-semibold);
+  line-height: 1.5;
+  text-align: center;
+  color: #fff;
+  background-color: var(--color-accent);
+  border-radius: var(--radius-full);
+}

@@ -18,6 +18,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { ApiError, ingest, logs } from '../lib/api'
 import { isInFlight } from '../lib/status'
+import { unwatchDocuments, watchDocuments } from '../lib/watch'
 import type { DocumentLogDetailResponse } from '../lib/types'
 
 export const BATCH_CONCURRENCY = 3
@@ -90,6 +91,7 @@ export function useBatchSubmit() {
           continue
         }
 
+        watchDocuments([submitted.id])
         patch(item.key, { phase: 'running', log: { ...submitted, webhookDeliveries: [] } }, run)
         const startedAt = Date.now()
         for (;;) {
@@ -98,7 +100,7 @@ export function useBatchSubmit() {
           try {
             const next = await logs.get(submitted.id)
             patch(item.key, { log: next }, run)
-            if (!isInFlight(next.status)) break
+            if (!isInFlight(next.status)) { unwatchDocuments([submitted.id]); break }
           } catch (e) {
             // Network blip / 5xx: keep polling. A 4xx can never succeed on retry.
             if (e instanceof ApiError && e.status >= 400 && e.status < 500) {

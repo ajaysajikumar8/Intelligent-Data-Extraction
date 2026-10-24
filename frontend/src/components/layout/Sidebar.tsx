@@ -31,9 +31,11 @@ interface SidebarProps {
   drawer: boolean
   open: boolean
   onClose: () => void
+  /** Documents that finished since the user last looked; shown as a badge on Logs. */
+  finishedDocs: number
 }
 
-export function Sidebar({ id, drawer, open, onClose }: SidebarProps) {
+export function Sidebar({ id, drawer, open, onClose, finishedDocs }: SidebarProps) {
   const navigate = useNavigate()
   const user = getUser()
   const ref = useRef<HTMLElement>(null)
@@ -104,6 +106,12 @@ export function Sidebar({ id, drawer, open, onClose }: SidebarProps) {
           >
             <Icon size={17} />
             <span>{label}</span>
+            {to === '/logs' && finishedDocs > 0 && (
+              <span className={styles.badge}>
+                {finishedDocs}
+                <span className="sr-only"> finished {finishedDocs === 1 ? 'document' : 'documents'}</span>
+              </span>
+            )}
           </NavLink>
         ))}
       </nav>
