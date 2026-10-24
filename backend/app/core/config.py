@@ -100,7 +100,7 @@ class Settings(BaseSettings):
     # CORS
     # ------------------------------------------------------------------ #
     # Use plain str — AnyHttpUrl adds a trailing slash which breaks CORS origin matching.
-    FRONTEND_URL: str = "http://localhost:5173"
+    FRONTEND_URL: str = "http://localhost:5178"
 
     # ------------------------------------------------------------------ #
     # Outbound webhooks — SSRF protection (see app/core/url_safety.py).
@@ -112,7 +112,7 @@ class Settings(BaseSettings):
     # ------------------------------------------------------------------ #
     # Public API base URL — used to build inbound webhook URLs shown to customers
     # ------------------------------------------------------------------ #
-    API_BASE_URL: str = "http://localhost:8000"
+    API_BASE_URL: str = "http://localhost:8005"
 
     # ------------------------------------------------------------------ #
     # Google OAuth (optional — required only from Phase 3 onwards)

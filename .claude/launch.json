@@ -17,7 +17,7 @@
       "name": "website",
       "runtimeExecutable": "bash",
       "runtimeArgs": ["-c", "cd website && npm run dev"],
-      "port": 3000
+      "port": 3005
     }
   ]
 }
