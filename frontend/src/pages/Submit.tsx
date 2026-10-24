@@ -10,7 +10,7 @@ import { StatusBadge } from '../components/ui/Badge'
 import { describeFailure } from '../lib/failure'
 import { isInFlight } from '../lib/status'
 import { useDocumentPolling } from '../hooks/useDocumentPolling'
-import { useBatchSubmit } from '../hooks/useBatchSubmit'
+import { useBatch } from '../hooks/useBatch'
 import { MAX_BATCH_FILES, mergeFiles, trialLimit } from '../lib/batch'
 import { BatchPanel } from '../components/ui/BatchPanel'
 import { ProgressPanel } from '../components/ui/ProgressPanel'
@@ -65,7 +65,7 @@ export function Submit() {
   const [rawText, setRawText] = useState(() => (searchParams.get('sample') ? SAMPLE_DOCUMENT : ''))
   // One file keeps the single-document flow (optionally with text); two or more run as a batch.
   const [files, setFiles] = useState<File[]>([])
-  const batch = useBatchSubmit()
+  const batch = useBatch()
   const [workspace, setWorkspace] = useState<WorkspaceResponse | null>(null)
   const [isDragging, setIsDragging] = useState(false)
   const [loading, setLoading] = useState(false)

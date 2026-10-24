@@ -12,7 +12,8 @@
  *   every file not yet submitted is marked "not submitted" with the reason.
  * - `cancel()` stops new submissions; documents already submitted keep running
  *   on the server and still appear in Logs.
- * - Files not yet submitted live only in this tab, so the page must stay open.
+ * - Files not yet submitted live only in this tab: they survive navigating inside the app (the
+ *   hook is mounted by BatchProvider) but not closing or reloading the tab.
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react'

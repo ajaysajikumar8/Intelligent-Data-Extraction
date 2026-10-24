@@ -66,8 +66,8 @@ export function BatchPanel({ items, running, onCancel, onReset }: BatchPanelProp
 
       {running && (
         <p className={styles.note}>
-          Keep this page open until every file has been submitted ({BATCH_CONCURRENCY} are processed at a time).
-          Files already submitted keep running even if you leave.
+          {BATCH_CONCURRENCY} files are processed at a time. You can open other pages meanwhile, but keep this tab
+          open until every file has been sent. Files already sent keep running even if you close it.
         </p>
       )}
 
