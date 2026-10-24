@@ -99,8 +99,12 @@ model Workspace {
   // the platform Gemini key to be used (and billed) on their behalf.
   // Defaults to false — platform budget is NEVER spent without explicit opt-in.
   allowPlatformFallback Boolean  @default(false)
+  // Free-trial credits: extractions the platform key may run for this workspace while it has
+  // no key of its own. Granted at signup (TRIAL_EXTRACTIONS), spent atomically per job and
+  // refunded if the job fails — see docs/adr/008-free-trial-credits.md. Existing rows get 0.
+  trialExtractionsRemaining Int  @default(0)
 
-  plan         Plan              @relation(fields: [planId], references: [id])
+  plan         Plan             @relation(fields: [planId], references: [id])
   users        User[]
   templates    Template[]
   documentLogs DocumentLog[]

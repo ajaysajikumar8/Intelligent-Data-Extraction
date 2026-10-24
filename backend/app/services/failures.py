@@ -36,7 +36,8 @@ class FailureCode(str, Enum):
 
 _MESSAGES: dict[FailureCode, str] = {
     FailureCode.NO_AI_KEY: (
-        "No AI key configured. Add your Gemini API key in Settings → AI Integration, "
+        "No AI key configured. Add your Gemini API key in Settings → AI Integration "
+        "to keep extracting (any free trial extractions are used up), "
         "or enable Platform Key Fallback on a paid plan."
     ),
     FailureCode.AI_BUSY: (

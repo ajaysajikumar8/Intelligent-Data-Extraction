@@ -1,7 +1,7 @@
 import logging
 from functools import lru_cache
 
-from pydantic import model_validator
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 logger = logging.getLogger("app.core.config")
@@ -41,6 +41,13 @@ class Settings(BaseSettings):
     # failing the user. Opt-in: leave unset to disable. Must be a model this key can use
     # (e.g. one version behind GEMINI_MODEL); an unusable value is ignored at runtime.
     GEMINI_FALLBACK_MODEL: str | None = None
+
+    # ------------------------------------------------------------------ #
+    # Free trial (see docs/adr/008-free-trial-credits.md). Extractions each NEW workspace may
+    # run on the platform key before it must add its own Gemini key. 0 disables the trial
+    # (kill switch). Only affects signups from now on; it never re-grants existing workspaces.
+    # ------------------------------------------------------------------ #
+    TRIAL_EXTRACTIONS: int = Field(default=5, ge=0, le=100)
 
     # ------------------------------------------------------------------ #
     # Extraction queue (in-process — see docs/adr/006-async-extraction-queue.md)

@@ -1,3 +1,9 @@
+import os
+
+# Tests sign up many workspaces; none should spend platform Gemini quota unless a test opts in
+# by setting trialExtractionsRemaining itself. Must be set before the app reads its settings.
+os.environ.setdefault("TRIAL_EXTRACTIONS", "0")
+
 import pytest_asyncio
 from app.core.db import connect_db, disconnect_db
 

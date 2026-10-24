@@ -83,6 +83,7 @@ class WorkspaceResponse(BaseModel):
     planId: str
     createdAt: datetime
     allowPlatformFallback: bool = False
+    trialExtractionsRemaining: int = 0
     geminiApiKey: str | None = Field(default=None, exclude=True)
 
     @computed_field  # type: ignore[misc]

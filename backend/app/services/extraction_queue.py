@@ -36,8 +36,7 @@ from prisma.models import Workspace
 
 from app.core.config import get_settings
 from app.core.db import db
-from app.core.encryption import decrypt
-from app.services import extraction_pipeline, failures
+from app.services import ai_access, extraction_pipeline, failures
 
 logger = logging.getLogger("app.services.extraction_queue")
 
@@ -78,9 +77,9 @@ def enqueue(
     """
     Schedule the pipeline for an existing PENDING DocumentLog.
 
-    The workspace's BYOAK key and platform-fallback flag are resolved here, once,
-    so every ingestion path (dashboard, API key, inbound adapters) routes keys
-    identically.
+    Which Gemini key the job runs on (own key / platform fallback / trial credit) is
+    resolved in `_run` via `ai_access.acquire`, so every ingestion path (dashboard,
+    API key, inbound adapters) routes keys identically.
     """
     job = {
         "doc_log_id": doc_log_id,
@@ -89,20 +88,29 @@ def enqueue(
         "file_bytes": file_bytes,
         "mime_type": mime_type,
         "target_template_id": template_id,
-        "custom_api_key": decrypt(workspace.geminiApiKey) if workspace.geminiApiKey else None,
-        "allow_platform_fallback": workspace.allowPlatformFallback,
     }
-    task = asyncio.create_task(_run(job), name=f"extraction:{doc_log_id}")
+    task = asyncio.create_task(_run(job, workspace), name=f"extraction:{doc_log_id}")
     _tasks.add(task)
     task.add_done_callback(_tasks.discard)
 
 
-async def _run(job: dict) -> None:
+async def _run(job: dict, workspace: Workspace) -> None:
     doc_log_id: str = job["doc_log_id"]
     timeout = get_settings().EXTRACTION_JOB_TIMEOUT_SECONDS
+    access: ai_access.AiAccess | None = None
+    failed = True  # until the pipeline reports otherwise; decides whether a trial credit is refunded
     try:
+        access = await ai_access.acquire(workspace)
         async with _get_semaphore():
-            await asyncio.wait_for(extraction_pipeline.run(**job), timeout=timeout)
+            result = await asyncio.wait_for(
+                extraction_pipeline.run(
+                    **job,
+                    custom_api_key=access.custom_api_key,
+                    allow_platform_fallback=access.allow_platform_fallback,
+                ),
+                timeout=timeout,
+            )
+        failed = access.trial_credit_held and result.status == "FAILED"
     except asyncio.TimeoutError:
         logger.error("[%s] Extraction exceeded %ds — failing", doc_log_id, timeout)
         await extraction_pipeline.fail_document(doc_log_id, failures.failure(failures.FailureCode.TIMEOUT))
@@ -113,6 +121,9 @@ async def _run(job: dict) -> None:
     except Exception as exc:  # noqa: BLE001 — pipeline.run handles its own errors; this is the last resort
         logger.exception("[%s] Unhandled extraction error: %s", doc_log_id, exc)
         await extraction_pipeline.fail_document(doc_log_id, failures.classify(exc))
+    finally:
+        if access and access.trial_credit_held and failed:
+            await ai_access.refund_trial_credit(workspace.id)
 
 
 async def wait_idle() -> None:
