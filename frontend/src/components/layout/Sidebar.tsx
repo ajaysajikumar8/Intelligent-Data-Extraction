@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react'
 import { NavLink, useNavigate } from 'react-router-dom'
 import {
   BarChart3,
@@ -10,6 +11,7 @@ import {
   Webhook
 } from 'lucide-react'
 import { clearSession, getUser } from '../../lib/auth'
+import { APP_NAME } from '../../lib/brand'
 import styles from './Sidebar.module.css'
 
 const NAV_ITEMS = [
@@ -21,9 +23,48 @@ const NAV_ITEMS = [
   { to: '/settings',  label: 'Settings',    Icon: Settings },
 ]
 
-export function Sidebar() {
+const FOCUSABLE = 'a[href], button:not([disabled])'
+
+interface SidebarProps {
+  id: string
+  /** Render as an off-canvas drawer (mobile) instead of a fixed rail. */
+  drawer: boolean
+  open: boolean
+  onClose: () => void
+}
+
+export function Sidebar({ id, drawer, open, onClose }: SidebarProps) {
   const navigate = useNavigate()
   const user = getUser()
+  const ref = useRef<HTMLElement>(null)
+
+  // A closed drawer is off-screen: keep it out of the tab order and a11y tree.
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    if (drawer && !open) el.setAttribute('inert', '')
+    else el.removeAttribute('inert')
+  }, [drawer, open])
+
+  // Drawer open: move focus in, trap Tab, close on Esc.
+  useEffect(() => {
+    const el = ref.current
+    if (!drawer || !open || !el) return
+    el.querySelector<HTMLElement>(FOCUSABLE)?.focus()
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') { onClose(); return }
+      if (e.key !== 'Tab') return
+      const items = el.querySelectorAll<HTMLElement>(FOCUSABLE)
+      if (items.length === 0) return
+      const first = items[0]
+      const last = items[items.length - 1]
+      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus() }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus() }
+    }
+    document.addEventListener('keydown', onKeyDown)
+    return () => document.removeEventListener('keydown', onKeyDown)
+  }, [drawer, open, onClose])
 
   const handleLogout = () => {
     clearSession()
@@ -35,16 +76,18 @@ export function Sidebar() {
     : user?.email?.[0]?.toUpperCase() ?? '?'
 
   return (
-    <aside className={styles.sidebar}>
+    <aside
+      id={id}
+      ref={ref}
+      className={[styles.sidebar, drawer ? styles.drawer : '', drawer && open ? styles.drawerOpen : ''].filter(Boolean).join(' ')}
+      aria-label={drawer ? 'Navigation menu' : undefined}
+    >
       {/* Brand */}
       <div className={styles.brand}>
         <div className={styles.logo}>
           <Zap size={18} />
         </div>
-        <div>
-          <span className={styles.brandName}>IDE</span>
-          <span className={styles.brandSub}>Dashboard</span>
-        </div>
+        <span className={styles.brandName}>{APP_NAME}</span>
       </div>
 
       {/* Navigation */}
