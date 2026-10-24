@@ -54,6 +54,29 @@ def decode_access_token(token: str) -> dict[str, Any]:
     return payload
 
 
+_VERIFY_PURPOSE = "verify_email"
+
+
+def create_verification_token(user_id: str, email: str) -> str:
+    """
+    Signed, expiring email-verification token. Carries a `purpose` claim so it can never be
+    accepted as a session token (get_current_user rejects any token with a purpose), and the
+    email so changing the address invalidates outstanding links.
+    """
+    return create_access_token(
+        {"sub": user_id, "email": email, "purpose": _VERIFY_PURPOSE},
+        expires_delta=timedelta(hours=get_settings().VERIFICATION_TOKEN_EXPIRE_HOURS),
+    )
+
+
+def decode_verification_token(token: str) -> dict[str, Any]:
+    """Raises JWTError if the token is invalid, expired, or not a verification token."""
+    payload = decode_access_token(token)
+    if payload.get("purpose") != _VERIFY_PURPOSE or not payload.get("sub") or not payload.get("email"):
+        raise JWTError("Not a verification token.")
+    return payload
+
+
 def generate_api_key() -> str:
     """
     Generate a secure random UUID string for workspace API keys.

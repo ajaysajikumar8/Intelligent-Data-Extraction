@@ -1,34 +1,44 @@
 import logging
 from uuid import uuid4
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
 from prisma.models import User
 
 from app.core.auth import get_current_user
 from app.core.config import get_settings
 from app.core.db import db
+from app.core.signup_guard import client_ip, enforce_limit, enforce_signup_limits
 from app.core.security import create_access_token, generate_api_key, generate_inbound_secret, hash_password, verify_password
 from app.models.schemas import (
+    ResendVerificationResponse,
     Role,
     TokenResponse,
     UserLoginRequest,
     UserResponse,
     UserSignupRequest,
+    VerifyEmailRequest,
+    VerifyEmailResponse,
     WorkspaceWithPlanResponse,
 )
+from app.services import email_verification
 
 logger = logging.getLogger("app.api.auth")
 router = APIRouter()
 
 
 @router.post("/signup", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
-async def signup(payload: UserSignupRequest) -> TokenResponse:
+async def signup(
+    payload: UserSignupRequest, request: Request, background_tasks: BackgroundTasks
+) -> TokenResponse:
     """
     User Registration Endpoint.
+    0. Blocks disposable domains and enforces per-IP / per-domain rate limits.
     1. Verifies email uniqueness.
     2. Enforces presence of pre-seeded 'free' Plan in database.
-    3. Creates new Workspace and User (assigned as OWNER).
-    4. Issues JWT access token.
+    3. Creates new Workspace (0 trial credits until the email is verified) and User (OWNER).
+    4. Emails a verification link and issues a JWT access token.
     """
+    enforce_signup_limits(request, payload.email)
+
     # 1. Check existing user
     existing_user = await db.user.find_unique(where={"email": payload.email})
     if existing_user:
@@ -59,7 +69,7 @@ async def signup(payload: UserSignupRequest) -> TokenResponse:
             "apiKey": api_key,
             "inboundSecret": generate_inbound_secret(),
             "planId": free_plan.id,
-            "trialExtractionsRemaining": get_settings().TRIAL_EXTRACTIONS,
+            # Trial credits are granted on email verification, not here (ADR-009).
         },
         include={"plan": True},
     )
@@ -74,7 +84,10 @@ async def signup(payload: UserSignupRequest) -> TokenResponse:
         }
     )
 
-    # 4. Generate Token
+    # 4. Verification email (after the response, so a slow mail provider never delays signup)
+    background_tasks.add_task(email_verification.send_verification, user)
+
+    # 5. Generate Token
     access_token = create_access_token(
         data={
             "sub": user.id,
@@ -89,6 +102,33 @@ async def signup(payload: UserSignupRequest) -> TokenResponse:
         user=UserResponse.model_validate(user),
         workspace=WorkspaceWithPlanResponse.model_validate(workspace),
     )
+
+
+@router.post("/verify-email", response_model=VerifyEmailResponse)
+async def verify_email(payload: VerifyEmailRequest) -> VerifyEmailResponse:
+    """
+    Confirm an emailed verification link. Unauthenticated on purpose: the link is often opened
+    in a different browser than the one used to sign up. Grants the free trial exactly once.
+    """
+    granted = await email_verification.verify_email(payload.token)
+    return VerifyEmailResponse(trialExtractionsGranted=granted)
+
+
+@router.post("/resend-verification", response_model=ResendVerificationResponse)
+async def resend_verification(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    current_user: User = Depends(get_current_user),
+) -> ResendVerificationResponse:
+    """Re-send the verification link to the signed-in user (rate limited)."""
+    if current_user.emailVerifiedAt:
+        return ResendVerificationResponse(status="already_verified")
+
+    limit = get_settings().VERIFICATION_RESEND_LIMIT_PER_HOUR
+    enforce_limit("resend-user", current_user.id, limit)
+    enforce_limit("resend-ip", client_ip(request), limit * 3)
+    background_tasks.add_task(email_verification.send_verification, current_user)
+    return ResendVerificationResponse(status="sent")
 
 
 @router.post("/login", response_model=TokenResponse)

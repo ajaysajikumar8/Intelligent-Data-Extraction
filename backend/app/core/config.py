@@ -50,6 +50,30 @@ class Settings(BaseSettings):
     TRIAL_EXTRACTIONS: int = Field(default=5, ge=0, le=100)
 
     # ------------------------------------------------------------------ #
+    # Signup abuse protection (see docs/adr/009-email-verification-and-signup-limits.md).
+    # Trial credits are granted when the email is verified, not at signup. Rate limits are
+    # in-process (per instance) like the extraction queue; swap for a shared store if scaled out.
+    # ------------------------------------------------------------------ #
+    # Max credit grants per UTC day across the platform — a spend circuit breaker. 0 = grant none.
+    TRIAL_DAILY_GRANT_CAP: int = Field(default=50, ge=0)
+    SIGNUP_LIMIT_PER_IP_PER_HOUR: int = Field(default=5, ge=1)
+    # Non-mainstream email domains only (gmail.com etc. are exempt — see core/signup_guard.py).
+    SIGNUP_LIMIT_PER_DOMAIN_PER_HOUR: int = Field(default=3, ge=1)
+    VERIFICATION_RESEND_LIMIT_PER_HOUR: int = Field(default=3, ge=1)
+    VERIFICATION_TOKEN_EXPIRE_HOURS: int = Field(default=24, ge=1)
+    # How many reverse proxies sit in front of the app (Render/Railway = 1). The client IP is
+    # taken from that many entries from the RIGHT of X-Forwarded-For; 0 ignores the header.
+    # Never raise this above the real hop count — the left side of the header is client-forged.
+    TRUSTED_PROXY_HOPS: int = Field(default=0, ge=0, le=5)
+
+    # ------------------------------------------------------------------ #
+    # Outbound email (Resend). With no key set, emails are logged instead of sent (local dev).
+    # EMAIL_FROM must be on a domain verified in Resend, e.g. "App <noreply@yourdomain.com>".
+    # ------------------------------------------------------------------ #
+    RESEND_API_KEY: str | None = None
+    EMAIL_FROM: str = "Intelligent Data Extraction <onboarding@resend.dev>"
+
+    # ------------------------------------------------------------------ #
     # Extraction queue (in-process — see docs/adr/006-async-extraction-queue.md)
     # Limits are per process. Queued jobs hold uploaded file bytes in memory,
     # so the backlog is capped: roughly MAX_BACKLOG × the 20 MB upload limit.

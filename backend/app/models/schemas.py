@@ -142,7 +142,21 @@ class UserResponse(BaseModel):
     workspaceId: str
     role: Role
     isActive: bool
+    emailVerifiedAt: datetime | None = None
     createdAt: datetime
+
+
+class VerifyEmailRequest(BaseModel):
+    token: str = Field(..., min_length=1, max_length=2000)
+
+
+class VerifyEmailResponse(BaseModel):
+    status: str = "verified"
+    trialExtractionsGranted: int = 0
+
+
+class ResendVerificationResponse(BaseModel):
+    status: str  # "sent" | "already_verified"
 
 
 class TokenResponse(BaseModel):

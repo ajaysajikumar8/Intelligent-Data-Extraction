@@ -1,7 +1,7 @@
 """
 test_trial_credits.py — Free-trial credits (docs/adr/008-free-trial-credits.md).
 
-  • signup grants TRIAL_EXTRACTIONS and the workspace response exposes the balance
+  • email verification (not signup) grants TRIAL_EXTRACTIONS — see test_email_verification.py
   • key routing: own key / platform fallback never spend a credit; the trial does
   • spending is atomic under concurrency; failed jobs refund, finished ones don't
 """
@@ -17,6 +17,7 @@ from httpx import ASGITransport, AsyncClient
 from app.core.config import get_settings
 from app.core.db import db
 from app.core.encryption import encrypt
+from app.core.security import create_verification_token
 from app.main import app
 from app.services import ai_access, extraction_queue
 
@@ -47,15 +48,18 @@ async def _credits(ws_id: str) -> int:
 
 
 @pytest.mark.asyncio
-async def test_signup_grants_configured_trial_and_exposes_balance():
+async def test_signup_grants_nothing_until_email_verified():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         with patch.object(get_settings(), "TRIAL_EXTRACTIONS", 5):
             data = await _signup(client)
-        try:
-            assert data["workspace"]["trialExtractionsRemaining"] == 5
-            assert await _credits(data["workspace"]["id"]) == 5
-        finally:
-            await _cleanup(data)
+            try:
+                assert data["workspace"]["trialExtractionsRemaining"] == 0
+                token = create_verification_token(data["user"]["id"], data["user"]["email"])
+                res = await client.post("/api/v1/auth/verify-email", json={"token": token})
+                assert res.status_code == 200, res.text
+                assert await _credits(data["workspace"]["id"]) == 5
+            finally:
+                await _cleanup(data)
 
 
 @pytest.mark.asyncio

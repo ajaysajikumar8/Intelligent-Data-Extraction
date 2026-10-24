@@ -24,7 +24,8 @@ async def get_current_user(token: str | None = Depends(oauth2_scheme)) -> User:
     try:
         payload = decode_access_token(token)
         user_id: str | None = payload.get("sub")
-        if not user_id:
+        # Purpose-scoped tokens (e.g. the emailed verification link) are not sessions.
+        if not user_id or payload.get("purpose"):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid token claims.",

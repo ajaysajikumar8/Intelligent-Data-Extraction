@@ -103,6 +103,9 @@ model Workspace {
   // no key of its own. Granted at signup (TRIAL_EXTRACTIONS), spent atomically per job and
   // refunded if the job fails — see docs/adr/008-free-trial-credits.md. Existing rows get 0.
   trialExtractionsRemaining Int  @default(0)
+  // Set once, atomically, when the trial is granted (on email verification — ADR-009). Doubles
+  // as the "already granted" guard and the source for the daily grant cap. null = never granted.
+  trialGrantedAt DateTime?
 
   plan         Plan             @relation(fields: [planId], references: [id])
   users        User[]
@@ -129,6 +132,8 @@ model User {
   workspaceId  String
   role         Role     @default(MEMBER)
   isActive     Boolean  @default(true)
+  // null = address not yet confirmed. Existing users are backfilled as verified (ADR-009).
+  emailVerifiedAt DateTime?
   createdAt    DateTime @default(now())
 
   workspace    Workspace     @relation(fields: [workspaceId], references: [id])
