@@ -2,11 +2,13 @@ import logging
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 from fastapi import FastAPI, Depends
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api import api_router
 from app.core.config import Settings, get_settings
 from app.core.db import db, connect_db, disconnect_db
+from app.core.validation import validation_error_handler
 from app.services import extraction_queue
 
 logger = logging.getLogger("app.main")
@@ -68,6 +70,7 @@ def _configure_cors(application: FastAPI, settings: Settings) -> None:
 
 
 _configure_cors(app, get_settings())
+app.add_exception_handler(RequestValidationError, validation_error_handler)
 
 
 # --------------------------------------------------------------------------- #
