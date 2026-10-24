@@ -70,3 +70,29 @@ export function describeFailure(validationErrors: unknown): FailureInfo | null {
 
   return { kind: 'unknown', raw: validationErrors }
 }
+
+/** Failure codes that a retry can fix. Keep in sync with `RETRYABLE_CODES` in backend `failures.py`. */
+const RETRYABLE_CODES = new Set([
+  'AI_BUSY', 'RATE_LIMITED', 'TIMEOUT', 'INTERRUPTED', 'BAD_AI_OUTPUT', 'NO_AI_KEY', 'AI_KEY_INVALID',
+])
+
+export type Retryability =
+  | { kind: 'none' }
+  | { kind: 'ok' }
+  /** Would be retryable, but the original upload was not stored. */
+  | { kind: 'needs-reupload'; reason: string }
+
+export function retryability(log: {
+  status: string
+  validationErrors: unknown
+  rawInput: string | null
+  fileName: string | null
+}): Retryability {
+  if (log.status !== 'FAILED' || !isRecord(log.validationErrors)) return { kind: 'none' }
+  const code = log.validationErrors.code
+  if (typeof code !== 'string' || !RETRYABLE_CODES.has(code)) return { kind: 'none' }
+  if (log.fileName || !log.rawInput?.trim()) {
+    return { kind: 'needs-reupload', reason: "Uploaded files aren't stored, so please upload this document again." }
+  }
+  return { kind: 'ok' }
+}

@@ -9,6 +9,7 @@ import { Button } from '../components/ui/Button'
 import toast from 'react-hot-toast'
 import { describeFailure } from '../lib/failure'
 import { FailureDetails } from '../components/ui/FailureDetails'
+import { RetryAction } from '../components/ui/RetryAction'
 import { exportLogsAsCsv, exportLogsAsJson } from '../lib/export'
 import { isInFlight } from '../lib/status'
 import { progressHint } from '../lib/progress'
@@ -71,6 +72,11 @@ export function Logs() {
       logsApi.get(expanded).then((data) => setDetails((prev) => ({ ...prev, [expanded]: data })))
     }
   }, [logs, expanded, details])
+
+  const handleRetried = (updated: DocumentLogResponse) => {
+    setLogs((prev) => prev.map((l) => (l.id === updated.id ? updated : l)))
+    setDetails((prev) => ({ ...prev, [updated.id]: { ...updated, webhookDeliveries: prev[updated.id]?.webhookDeliveries ?? [] } }))
+  }
 
   const toggle = (id: string) => {
     setExpanded((prev) => (prev === id ? null : id))
@@ -324,7 +330,9 @@ export function Logs() {
                     )}
                   </div>
                 ) : details[expanded].status === 'FAILED' && describeFailure(details[expanded].validationErrors) ? (
-                  <FailureDetails failure={describeFailure(details[expanded].validationErrors)!} />
+                  <FailureDetails failure={describeFailure(details[expanded].validationErrors)!}>
+                    <RetryAction log={details[expanded]} onRetried={handleRetried} />
+                  </FailureDetails>
                 ) : details[expanded].status === 'UNMATCHED' ? (
                   <div style={{ background: 'var(--bg-warning-subtle, rgba(245, 158, 11, 0.1))', border: '1px solid var(--border-warning, #f59e0b)', borderRadius: '8px', padding: '16px' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px', color: 'var(--text-warning, #d97706)' }}>

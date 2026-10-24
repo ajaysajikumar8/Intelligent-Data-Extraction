@@ -314,6 +314,10 @@ export const logs = {
   get: (documentId: string) =>
     request<DocumentLogDetailResponse>(`/logs/${documentId}`),
 
+  /** Re-queue a document that failed for a temporary reason. Text submissions only. */
+  retry: (documentId: string) =>
+    request<DocumentLogResponse>(`/logs/${documentId}/retry`, { method: 'POST' }),
+
   /**
    * Submit human corrections for an extraction.
    * This updates the log status to SUCCESS, stores the correction for prompt injection,

@@ -1,9 +1,10 @@
+import type { ReactNode } from 'react'
 import { AlertCircle } from 'lucide-react'
 import type { FailureInfo } from '../../lib/failure'
 import styles from './FailureDetails.module.css'
 
 /** Explains why an extraction failed, in terms the user can act on. */
-export function FailureDetails({ failure }: { failure: FailureInfo }) {
+export function FailureDetails({ failure, children }: { failure: FailureInfo; children?: ReactNode }) {
   const title =
     failure.kind === 'fields' ? 'Validation Engine Failed'
     : failure.kind === 'message' ? failure.title
@@ -38,6 +39,8 @@ export function FailureDetails({ failure }: { failure: FailureInfo }) {
       )}
 
       {failure.kind === 'unknown' && <pre className={styles.raw}>{JSON.stringify(failure.raw, null, 2)}</pre>}
+
+      {children}
     </div>
   )
 }

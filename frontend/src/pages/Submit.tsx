@@ -15,6 +15,7 @@ import { MAX_BATCH_FILES, mergeFiles, trialLimit } from '../lib/batch'
 import { BatchPanel } from '../components/ui/BatchPanel'
 import { ProgressPanel } from '../components/ui/ProgressPanel'
 import { FailureDetails } from '../components/ui/FailureDetails'
+import { RetryAction } from '../components/ui/RetryAction'
 import { exportLogsAsCsv, exportLogsAsJson } from '../lib/export'
 import { SAMPLE_DOCUMENT } from '../lib/sample'
 import styles from './Submit.module.css'
@@ -71,7 +72,9 @@ export function Submit() {
   // `submitted` is the PENDING log returned by POST /ingest; the queue then runs
   // the extraction in the background and `useDocumentPolling` follows it to a final status.
   const [submitted, setSubmitted] = useState<DocumentLogResponse | null>(null)
-  const { log: polled, timedOut } = useDocumentPolling(submitted?.id ?? null)
+  // Bumped on retry: the document keeps its id, so polling must be told to start over.
+  const [attempt, setAttempt] = useState(0)
+  const { log: polled, timedOut } = useDocumentPolling(submitted?.id ?? null, attempt)
   const result = polled ?? submitted
   const stillRunning = result !== null && isInFlight(result.status)
   const isProcessing = stillRunning && !timedOut
@@ -166,6 +169,14 @@ export function Submit() {
     } finally {
       setLoading(false)
     }
+  }
+
+  const handleRetried = (log: DocumentLogResponse) => {
+    announcedId.current = null
+    setCopied(false)
+    setSubmitted(log)
+    setAttempt((n) => n + 1)
+    rememberSubmission(log.id)
   }
 
   const handleCopyJson = () => {
@@ -384,7 +395,9 @@ export function Submit() {
                   {JSON.stringify(result.extractedJson, null, 2)}
                 </pre>
               ) : failure ? (
-                <FailureDetails failure={failure} />
+                <FailureDetails failure={failure}>
+                  <RetryAction log={result} onRetried={handleRetried} />
+                </FailureDetails>
               ) : (
                 <p className={styles.resultMeta}>No structured data extracted.</p>
               )}

@@ -15,16 +15,19 @@ Authentication: Bearer JWT or X-API-Key.
 """
 
 import logging
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from prisma import Json
 from prisma.models import Workspace
 
 from typing import Any
 from pydantic import BaseModel
+from app.api.ingest import check_in_flight
 from app.core.auth import get_current_workspace
 from app.core.db import db
 from app.models.schemas import DocumentLogDetailResponse, DocumentLogResponse, WebhookDeliveryResponse
-from app.services import webhook_dispatcher
+from app.services import extraction_queue, failures, webhook_dispatcher
 from app.services.extraction_pipeline import validate_correction
 
 logger = logging.getLogger("app.api.logs")
@@ -155,3 +158,76 @@ async def correct_document_extraction(
         **DocumentLogResponse.model_validate(updated_log).model_dump(),
         webhookDeliveries=deliveries,
     )
+
+
+@router.post(
+    "/{document_id}/retry",
+    response_model=DocumentLogResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def retry_failed_document(
+    document_id: str,
+    workspace: Workspace = Depends(get_current_workspace),
+) -> DocumentLogResponse:
+    """
+    Re-queue a FAILED document that failed for a retryable reason (AI busy, rate limited,
+    timeout, restart, unreadable AI output, or a missing/invalid key that was since fixed).
+
+    The same DocumentLog is reused (reset to PENDING) rather than copied: the monthly quota
+    is not charged twice and Logs does not fill with duplicates. Uploaded files are not
+    stored, so only text submissions can be retried; file uploads must be submitted again.
+    If the document ran on a specific/matched template, that template is reused (skipping
+    classification); otherwise the retry auto-detects again.
+    """
+    doc_log = await db.documentlog.find_unique(where={"id": document_id})
+    if not doc_log or doc_log.workspaceId != workspace.id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document log not found.")
+
+    if doc_log.status != "FAILED" or failures.failure_code(doc_log.validationErrors) not in failures.RETRYABLE_CODES:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Only documents that failed for a temporary reason can be retried.",
+        )
+    if doc_log.fileName or not (doc_log.rawInput and doc_log.rawInput.strip()):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Uploaded files are not stored, so this document can't be retried. Please upload it again.",
+        )
+
+    await check_in_flight(workspace)
+    try:
+        extraction_queue.ensure_capacity()
+    except extraction_queue.QueueFullError:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="The extraction service is busy right now. Please try again in a minute.",
+            headers={"Retry-After": "30"},
+        )
+
+    # Claim the retry atomically so a double-click or two tabs cannot queue the job twice.
+    # createdAt is reset: it is the "queued at" time that crash recovery and the in-flight cap use.
+    claimed = await db.documentlog.update_many(
+        where={"id": doc_log.id, "workspaceId": workspace.id, "status": "FAILED"},
+        data={
+            "status": "PENDING",
+            "validationErrors": Json(None),  # type: ignore[arg-type]
+            "progress": Json(None),  # type: ignore[arg-type]
+            "processingMs": None,
+            "createdAt": datetime.now(timezone.utc),
+        },
+    )
+    if not claimed:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="This document is already being retried.")
+
+    logger.info("Retrying document %s (workspace %s)", doc_log.id, workspace.id)
+    extraction_queue.enqueue(
+        doc_log_id=doc_log.id,
+        workspace=workspace,
+        raw_text=doc_log.rawInput.strip(),
+        file_bytes=None,
+        mime_type=None,
+        template_id=doc_log.templateId,
+    )
+
+    refreshed = await db.documentlog.find_unique(where={"id": doc_log.id})
+    return DocumentLogResponse.model_validate(refreshed)

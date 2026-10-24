@@ -75,7 +75,7 @@ async def _check_quota(workspace: Workspace) -> None:
         )
 
 
-async def _check_in_flight(workspace: Workspace) -> None:
+async def check_in_flight(workspace: Workspace) -> None:
     """
     Reject new work while the workspace already has too many documents queued or
     running, so a large batch cannot starve other workspaces of the shared queue.
@@ -193,7 +193,7 @@ async def ingest(
         file_bytes, content_type = await validate_and_read_file(file)
 
     await _check_quota(workspace)
-    await _check_in_flight(workspace)
+    await check_in_flight(workspace)
 
     # Reject before creating a log row: queued jobs hold uploaded bytes in memory.
     try:

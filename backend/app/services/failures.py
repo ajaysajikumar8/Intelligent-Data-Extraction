@@ -74,6 +74,27 @@ _MESSAGES: dict[FailureCode, str] = {
 }
 
 
+# Failures a user can fix by simply trying again (provider hiccups, restarts) or after fixing their
+# key. Everything else (blocked content, unreadable document, schema violations) would fail again.
+RETRYABLE_CODES: frozenset[str] = frozenset({
+    FailureCode.AI_BUSY.value,
+    FailureCode.RATE_LIMITED.value,
+    FailureCode.TIMEOUT.value,
+    FailureCode.INTERRUPTED.value,
+    FailureCode.BAD_AI_OUTPUT.value,
+    FailureCode.NO_AI_KEY.value,
+    FailureCode.AI_KEY_INVALID.value,
+})
+
+
+def failure_code(validation_errors: object) -> str | None:
+    """The stored failure code of a FAILED document, or None for legacy/field-validation shapes."""
+    if isinstance(validation_errors, dict):
+        code = validation_errors.get("code")
+        return code if isinstance(code, str) else None
+    return None
+
+
 @dataclass(frozen=True)
 class Failure:
     code: FailureCode
