@@ -81,6 +81,9 @@ class Settings(BaseSettings):
     EXTRACTION_MAX_CONCURRENCY: int = 4
     EXTRACTION_MAX_BACKLOG: int = 50
     EXTRACTION_JOB_TIMEOUT_SECONDS: int = 450
+    # Per-workspace cap on documents queued or running, so one tenant's batch
+    # cannot fill the shared backlog. Set to 0 to disable.
+    EXTRACTION_MAX_IN_FLIGHT_PER_WORKSPACE: int = 25
 
     # ------------------------------------------------------------------ #
     # Encryption — Fernet key for encrypting BYOAK Gemini keys at rest

@@ -25,13 +25,14 @@ Authentication: Bearer JWT (dashboard users) or X-API-Key (integrations).
 """
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from prisma.models import User, Workspace
 
 from app.core.auth import get_current_user, get_current_workspace
+from app.core.config import get_settings
 from app.core.db import db
 from app.core.utils import validate_and_read_file
 from app.models.schemas import DocumentLogResponse, ExtractionStatus, Source
@@ -71,6 +72,37 @@ async def _check_quota(workspace: Workspace) -> None:
                 f"Monthly extraction quota of {plan.maxExtractionsPerMonth} "
                 f"reached for plan '{plan.name}'. Upgrade your plan to continue."
             ),
+        )
+
+
+async def _check_in_flight(workspace: Workspace) -> None:
+    """
+    Reject new work while the workspace already has too many documents queued or
+    running, so a large batch cannot starve other workspaces of the shared queue.
+    Raises HTTP 429 with Retry-After; clients should wait for jobs to finish.
+    """
+    settings = get_settings()
+    limit = settings.EXTRACTION_MAX_IN_FLIGHT_PER_WORKSPACE
+    if limit <= 0:
+        return
+
+    # Rows older than the job timeout are crash orphans, not live jobs.
+    cutoff = datetime.now(timezone.utc) - timedelta(seconds=settings.EXTRACTION_JOB_TIMEOUT_SECONDS + 60)
+    in_flight = await db.documentlog.count(
+        where={
+            "workspaceId": workspace.id,
+            "status": {"in": ["PENDING", "PROCESSING"]},
+            "createdAt": {"gte": cutoff},
+        }  # type: ignore[arg-type]
+    )
+    if in_flight >= limit:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=(
+                f"{in_flight} documents are already being processed. "
+                "Wait for some to finish, then submit more."
+            ),
+            headers={"Retry-After": "15"},
         )
 
 
@@ -161,6 +193,7 @@ async def ingest(
         file_bytes, content_type = await validate_and_read_file(file)
 
     await _check_quota(workspace)
+    await _check_in_flight(workspace)
 
     # Reject before creating a log row: queued jobs hold uploaded bytes in memory.
     try:

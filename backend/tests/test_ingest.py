@@ -11,10 +11,12 @@ All tests hit POST /api/v1/ingest/ — the single unified endpoint.
 
 import json
 import pytest
+from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 from httpx import ASGITransport, AsyncClient
 
+from app.core.config import get_settings
 from app.core.db import db
 from app.main import app
 from app.services import extraction_queue
@@ -293,3 +295,65 @@ async def test_ingest_file_wrong_mime_rejected():
         # Cleanup
         await db.user.delete(where={"id": user_id})
         await db.workspace.delete(where={"id": workspace_id})
+
+
+# ---------------------------------------------------------------------------
+# Per-workspace in-flight cap (batch uploads)
+# ---------------------------------------------------------------------------
+
+async def _seed_logs(workspace_id: str, status: str, count: int, age_hours: int = 0) -> None:
+    created_at = datetime.now(timezone.utc) - timedelta(hours=age_hours)
+    for _ in range(count):
+        await db.documentlog.create(
+            data={
+                "workspace": {"connect": {"id": workspace_id}},
+                "source": "MANUAL",
+                "status": status,  # type: ignore[typeddict-item]
+                "createdAt": created_at,
+            }
+        )
+
+
+@pytest.mark.asyncio
+async def test_ingest_rejected_when_workspace_has_too_many_in_flight():
+    """A workspace at its in-flight cap gets 429 + Retry-After and no new DocumentLog row."""
+    limited = get_settings().model_copy(update={"EXTRACTION_MAX_IN_FLIGHT_PER_WORKSPACE": 2})
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        token, _, workspace_id, _, _ = await _signup_and_create_template(client)
+        headers = {"Authorization": f"Bearer {token}"}
+
+        # Two live jobs fill the cap; finished and long-dead (orphaned) rows must not count.
+        await _seed_logs(workspace_id, "PENDING", 1)
+        await _seed_logs(workspace_id, "PROCESSING", 1)
+        await _seed_logs(workspace_id, "SUCCESS", 3)
+        await _seed_logs(workspace_id, "PROCESSING", 3, age_hours=48)
+        before = await db.documentlog.count(where={"workspaceId": workspace_id})
+
+        with patch("app.api.ingest.get_settings", return_value=limited):
+            res = await client.post("/api/v1/ingest/", data={"rawInput": "invoice text"}, headers=headers)
+
+        assert res.status_code == 429, res.text
+        assert res.headers["Retry-After"] == "15"
+        assert await db.documentlog.count(where={"workspaceId": workspace_id}) == before
+
+
+@pytest.mark.asyncio
+async def test_ingest_allowed_below_in_flight_cap():
+    """Finished documents free up capacity: only queued/running rows count toward the cap."""
+    limited = get_settings().model_copy(update={"EXTRACTION_MAX_IN_FLIGHT_PER_WORKSPACE": 2})
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        token, _, workspace_id, _, template_id = await _signup_and_create_template(client)
+        headers = {"Authorization": f"Bearer {token}"}
+        await _seed_logs(workspace_id, "PENDING", 1)
+        await _seed_logs(workspace_id, "SUCCESS", 5)
+
+        payload = json.dumps({"vendor_name": "Acme", "invoice_number": "1", "total_amount": 1})
+        with patch("app.api.ingest.get_settings", return_value=limited), patch(
+            "app.services.gemini_service.generate_text",
+            new=AsyncMock(side_effect=[template_id, payload]),
+        ):
+            data = await _ingest_and_wait(client, headers, {"rawInput": "invoice text"})
+
+        assert data["status"] == "SUCCESS"

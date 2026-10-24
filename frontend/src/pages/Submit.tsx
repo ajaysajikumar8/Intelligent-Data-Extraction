@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { AlertTriangle, Check, Copy, Download, ExternalLink, FileUp, GitMerge, Plus, Send, Sparkles, Upload, X } from 'lucide-react'
 import toast from 'react-hot-toast'
@@ -10,6 +10,9 @@ import { StatusBadge } from '../components/ui/Badge'
 import { describeFailure } from '../lib/failure'
 import { isInFlight } from '../lib/status'
 import { useDocumentPolling } from '../hooks/useDocumentPolling'
+import { useBatchSubmit } from '../hooks/useBatchSubmit'
+import { MAX_BATCH_FILES, mergeFiles } from '../lib/batch'
+import { BatchPanel } from '../components/ui/BatchPanel'
 import { ProgressPanel } from '../components/ui/ProgressPanel'
 import { FailureDetails } from '../components/ui/FailureDetails'
 import { exportLogsAsCsv, exportLogsAsJson } from '../lib/export'
@@ -59,7 +62,9 @@ export function Submit() {
   // `?sample=1` (from the first-run checklist) pre-fills a realistic invoice to try.
   const [searchParams] = useSearchParams()
   const [rawText, setRawText] = useState(() => (searchParams.get('sample') ? SAMPLE_DOCUMENT : ''))
-  const [file, setFile] = useState<File | null>(null)
+  // One file keeps the single-document flow (optionally with text); two or more run as a batch.
+  const [files, setFiles] = useState<File[]>([])
+  const batch = useBatchSubmit()
   const [isDragging, setIsDragging] = useState(false)
   const [loading, setLoading] = useState(false)
   // `submitted` is the PENDING log returned by POST /ingest; the queue then runs
@@ -70,6 +75,8 @@ export function Submit() {
   const stillRunning = result !== null && isInFlight(result.status)
   const isProcessing = stillRunning && !timedOut
   const [copied, setCopied] = useState(false)
+  const isBatch = files.length > 1
+  const showBatchPanel = batch.items.length > 0
   const fileRef = useRef<HTMLInputElement>(null)
   const announcedId = useRef<string | null>(null)
 
@@ -102,15 +109,35 @@ export function Submit() {
   const exportName = `extraction_${result?.id.slice(0, 8) ?? ''}`
   const matchedTemplate = result?.templateId ? tmplList.find((t) => t.id === result.templateId) : null
 
+  const addFiles = (incoming: File[]) => {
+    const { accepted, skipped } = mergeFiles(files, incoming)
+    setFiles(accepted)
+    if (skipped.length > 0) {
+      toast.error(
+        skipped.length === 1 ? skipped[0] : `${skipped.length} files skipped: ${skipped[0]} (and ${skipped.length - 1} more)`,
+        { duration: 6000 },
+      )
+    }
+  }
+
+  const handleBatchSubmit = () => {
+    setSubmitted(null); setCopied(false); rememberSubmission(null)
+    void batch.start(files, selectedTemplateId || undefined)
+    setFiles([])
+  }
+
   const handleSubmit = async () => {
+    if (isBatch) { handleBatchSubmit(); return }
+
     const useText = rawText.trim()
-    const useFile = file
+    const useFile = files[0] ?? null
 
     if (!useText && !useFile) {
       toast.error('Please provide at least a text body or an attached file.')
       return
     }
 
+    batch.reset()
     setLoading(true); setSubmitted(null); setCopied(false)
     try {
       const res = await ingest.submit({
@@ -135,14 +162,13 @@ export function Submit() {
     setTimeout(() => setCopied(false), 2000)
   }
 
-  const onFileDrop = useCallback((e: React.DragEvent) => {
+  const onFileDrop = (e: React.DragEvent) => {
     e.preventDefault()
     setIsDragging(false)
-    const dropped = e.dataTransfer.files[0]
-    if (dropped) setFile(dropped)
-  }, [])
+    addFiles(Array.from(e.dataTransfer.files))
+  }
 
-  const isSubmitDisabled = activeTemplates.length === 0 || loading || isProcessing
+  const isSubmitDisabled = activeTemplates.length === 0 || loading || isProcessing || batch.running
 
   return (
     <div className={styles.page}>
@@ -199,6 +225,7 @@ export function Submit() {
 
             <Textarea
               label="Document text (Optional)"
+              disabled={isBatch}
               id="submit-text"
               placeholder="Paste email body, document text, or any unstructured content here…"
               value={rawText}
@@ -207,12 +234,16 @@ export function Submit() {
             />
             
             <div className={styles.meta} style={{ marginTop: '-1rem' }}>
-              <span className={styles.charCount}>{rawText.length} chars</span>
+              <span className={styles.charCount}>
+                {isBatch ? 'Text is not used when submitting several files' : `${rawText.length} chars`}
+              </span>
             </div>
 
-            <label className={styles.hybridFileLabel}>Attached file (Optional)</label>
+            <label className={styles.hybridFileLabel}>
+              Attached files (Optional · up to {MAX_BATCH_FILES}; two or more run as a batch)
+            </label>
             <div
-              className={[styles.dropzone, styles.dropzoneCompact, isDragging ? styles.dragOver : '', file ? styles.hasFile : ''].filter(Boolean).join(' ')}
+              className={[styles.dropzone, styles.dropzoneCompact, isDragging ? styles.dragOver : '', files.length > 0 ? styles.hasFile : ''].filter(Boolean).join(' ')}
               onDragOver={(e) => { e.preventDefault(); setIsDragging(true) }}
               onDragLeave={() => setIsDragging(false)}
               onDrop={onFileDrop}
@@ -220,25 +251,32 @@ export function Submit() {
               onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fileRef.current?.click() } }}
               role="button"
               tabIndex={0}
-              aria-label="Upload attachment"
+              aria-label="Upload attachments"
             >
-              {file ? (
-                <div className={styles.fileInfo}>
-                  <FileUp size={20} style={{ color: 'var(--color-accent)' }} />
-                  <span className={styles.fileName}>{file.name}</span>
-                  <span className={styles.fileSize}>{(file.size / 1024).toFixed(1)} KB</span>
-                  <button
-                    className={styles.removeFile}
-                    onClick={(e) => { e.stopPropagation(); setFile(null) }}
-                    aria-label="Remove attachment"
-                  >
-                    <X size={14} />
-                  </button>
+              {files.length > 0 ? (
+                <div className={styles.fileList}>
+                  {files.map((f, i) => (
+                    <div key={`${f.name}:${f.size}:${f.lastModified}`} className={styles.fileInfo}>
+                      <FileUp size={20} style={{ color: 'var(--color-accent)' }} />
+                      <span className={styles.fileName}>{f.name}</span>
+                      <span className={styles.fileSize}>{(f.size / 1024).toFixed(1)} KB</span>
+                      <button
+                        className={styles.removeFile}
+                        onClick={(e) => { e.stopPropagation(); setFiles((prev) => prev.filter((_, j) => j !== i)) }}
+                        aria-label={`Remove ${f.name}`}
+                      >
+                        <X size={14} />
+                      </button>
+                    </div>
+                  ))}
+                  {files.length < MAX_BATCH_FILES && (
+                    <p className={styles.dropHint}>Drop or click to add more files</p>
+                  )}
                 </div>
               ) : (
                 <>
                   <Upload size={24} style={{ color: 'var(--color-text-subtle)' }} />
-                  <p className={styles.dropText}>Drop attachment here or click to browse</p>
+                  <p className={styles.dropText}>Drop files here or click to browse</p>
                   <p className={styles.dropHint}>PDF, PNG, JPEG, WEBP · Max 20 MB</p>
                 </>
               )}
@@ -247,25 +285,31 @@ export function Submit() {
               ref={fileRef}
               type="file"
               accept=".pdf,.png,.jpg,.jpeg,.webp"
+              multiple
               style={{ display: 'none' }}
-              onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+              onChange={(e) => { addFiles(Array.from(e.target.files ?? [])); e.target.value = '' }}
             />
 
             <Button
               onClick={handleSubmit}
-              loading={loading || isProcessing}
-              disabled={isSubmitDisabled || (!rawText.trim() && !file)}
+              loading={loading || isProcessing || batch.running}
+              disabled={isSubmitDisabled || (!rawText.trim() && files.length === 0)}
               size="lg"
               style={{ width: '100%', marginTop: '1rem' }}
             >
               <Send size={15} />
-              Run extraction
+              {isBatch ? `Run extraction on ${files.length} files` : 'Run extraction'}
             </Button>
           </div>
         </div>
 
-        {/* Result panel */}
-        {result && (
+        {/* Batch progress (several files) */}
+        {showBatchPanel && (
+          <BatchPanel items={batch.items} running={batch.running} onCancel={batch.cancel} onReset={batch.reset} />
+        )}
+
+        {/* Result panel (single document) */}
+        {!showBatchPanel && result && (
           <div className={styles.resultCard}>
             <div className={styles.resultHeader}>
               <div className={styles.resultTitleGroup}>
