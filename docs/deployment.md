@@ -15,8 +15,9 @@ Set environment variables in your platform's web dashboard (Render, Railway, Ver
 - For Backend: Use variables defined in `backend/.env.example` (`DATABASE_URL`, `GEMINI_API_KEY`, `SECRET_KEY`, etc.).
 - For Frontend: Use variables defined in `frontend/.env.example` (`VITE_API_BASE_URL`).
 
-Two optional backend settings worth knowing about (see `backend/app/core/config.py`):
+Three optional backend settings worth knowing about (see `backend/app/core/config.py`):
 - `GEMINI_FALLBACK_MODEL` — a backup Gemini model used when the primary is overloaded (e.g. one version behind `GEMINI_MODEL`). Unset = disabled. See [ADR-006](adr/006-async-extraction-queue.md).
+- `TRIAL_EXTRACTIONS` — free extractions each *new* workspace gets on the platform Gemini key (default `5`; `0` turns the trial off). Costs real money, so keep it small. See [ADR-008](adr/008-free-trial-credits.md).
 - `WEBHOOK_ALLOW_PRIVATE_HOSTS` — defaults to `false`; webhook URLs must be public. Set `true` **only** in local development. See [ADR-007](adr/007-ssrf-protection-for-webhooks.md). In production also restrict outbound network access at the platform level.
 
 The `VITE_` prefix is enforced by Vite at build time — only variables prefixed `VITE_` are inlined into the browser bundle. No `.env` files are required on production servers.
