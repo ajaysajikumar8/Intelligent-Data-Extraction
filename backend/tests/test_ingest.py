@@ -525,3 +525,27 @@ async def test_retry_cannot_be_claimed_twice_and_is_workspace_scoped():
             )
             assert sorted([first.status_code, second.status_code]) == [202, 409]
             await extraction_queue.wait_idle()
+
+
+@pytest.mark.asyncio
+async def test_ingest_works_with_only_an_api_key():
+    """Integrations authenticate with X-API-Key alone (no Bearer token): ingestion must accept that."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        token, api_key, workspace_id, _, template_id = await _signup_and_create_template(client)
+        payload = json.dumps({"vendor_name": "Acme", "invoice_number": "INV-9", "total_amount": 3})
+        with patch(
+            "app.services.gemini_service.generate_text",
+            new=AsyncMock(side_effect=[template_id, payload]),
+        ):
+            data = await _ingest_and_wait(
+                client, {"X-API-Key": api_key}, {"rawInput": "invoice text", "source": "API"}
+            )
+        assert data["status"] == "SUCCESS"
+        assert data["userId"] is None  # no signed-in user behind an API key
+
+        # An invalid token must still be rejected, not treated as anonymous.
+        bad = await client.post(
+            "/api/v1/ingest/", data={"rawInput": "x"}, headers={"X-API-Key": api_key, "Authorization": "Bearer nope"}
+        )
+        assert bad.status_code == 401

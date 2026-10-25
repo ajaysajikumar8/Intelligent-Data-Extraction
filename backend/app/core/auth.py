@@ -47,6 +47,16 @@ async def get_current_user(token: str | None = Depends(oauth2_scheme)) -> User:
     return user
 
 
+async def get_optional_user(token: str | None = Depends(oauth2_scheme)) -> User | None:
+    """
+    The signed-in dashboard user, or None for requests that authenticate with an X-API-Key only.
+    A token that is present but invalid is still rejected: it is never silently treated as anonymous.
+    """
+    if not token:
+        return None
+    return await get_current_user(token)
+
+
 async def get_current_workspace(
     token: str | None = Depends(oauth2_scheme),
     x_api_key: str | None = Header(None, alias="X-API-Key"),

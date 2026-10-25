@@ -31,7 +31,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from prisma.models import User, Workspace
 
-from app.core.auth import get_current_user, get_current_workspace
+from app.core.auth import get_current_workspace, get_optional_user
 from app.core.config import get_settings
 from app.core.db import db
 from app.core.utils import validate_and_read_file
@@ -151,7 +151,7 @@ async def ingest(
     source: Source = Form(Source.MANUAL),
     template_id: Optional[str] = Form(None, alias="templateId"),
     workspace: Workspace = Depends(get_current_workspace),
-    current_user: User | None = Depends(get_current_user),
+    current_user: User | None = Depends(get_optional_user),
 ) -> DocumentLogResponse:
     """
     Unified document ingestion endpoint.
