@@ -75,7 +75,7 @@ export function Logs() {
   const openStatus = expanded ? details[expanded]?.status : undefined
   useEffect(() => {
     if (openStatus !== 'NEEDS_REVIEW' || templateList) return
-    templatesApi.list().then(setTemplateList).catch(() => setTemplateList([]))
+    templatesApi.list({ includeInactive: true }).then(setTemplateList).catch(() => setTemplateList([]))
   }, [openStatus, templateList])
 
   const handleCorrected = (updated: DocumentLogDetailResponse) => {

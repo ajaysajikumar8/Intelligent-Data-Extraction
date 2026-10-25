@@ -79,6 +79,20 @@ class WorkspaceUpdate(BaseModel):
     name: str = Field(..., min_length=1, max_length=100)
 
 
+class ActivityLogResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    actorUserId: str | None = None
+    actorLabel: str
+    action: str
+    targetType: str | None = None
+    targetId: str | None = None
+    summary: str
+    ipAddress: str | None = None
+    createdAt: datetime
+
+
 class WorkspaceResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

@@ -7,6 +7,7 @@ import { VerifyEmail } from './pages/VerifyEmail'
 import { Dashboard } from './pages/Dashboard'
 import { Submit } from './pages/Submit'
 import { Logs } from './pages/Logs'
+import { Activity } from './pages/Activity'
 import { Templates } from './pages/Templates'
 import { Settings } from './pages/Settings'
 import { Integrations } from './pages/Integrations'
@@ -27,6 +28,7 @@ export function App() {
           <Route path="/dashboard"  element={<Dashboard />} />
           <Route path="/submit"     element={<Submit />} />
           <Route path="/logs"       element={<Logs />} />
+          <Route path="/activity"   element={<Activity />} />
           <Route path="/templates"  element={<Templates />} />
           <Route path="/integrations" element={<Integrations />} />
           <Route path="/settings"   element={<Settings />} />

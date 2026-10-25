@@ -1,10 +1,11 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from prisma.models import User, Workspace
 
 from app.core.auth import get_current_user, get_current_workspace, require_role
 from app.core.db import db
 from app.core.encryption import encrypt
 from app.core.security import generate_api_key
+from app.core.signup_guard import client_ip
 from app.models.schemas import (
     GeminiKeyUpdate,
     GeminiKeyUpdateResponse,
@@ -15,7 +16,7 @@ from app.models.schemas import (
     WorkspaceUpdate,
     WorkspaceWithPlanResponse,
 )
-from app.services import gemini_service
+from app.services import activity, gemini_service
 
 router = APIRouter()
 
@@ -43,12 +44,14 @@ async def get_current_workspace_details(
 @router.put("/current", response_model=WorkspaceWithPlanResponse)
 async def update_current_workspace(
     payload: WorkspaceUpdate,
+    request: Request,
     current_user: User = Depends(require_role(Role.OWNER)),
 ) -> WorkspaceWithPlanResponse:
     """
     Update workspace metadata (e.g. name).
     Restricted to workspace OWNER role.
     """
+    before = await db.workspace.find_unique(where={"id": current_user.workspaceId})
     updated_workspace = await db.workspace.update(
         where={"id": current_user.workspaceId},
         data={"name": payload.name},
@@ -59,11 +62,18 @@ async def update_current_workspace(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Workspace not found.",
         )
+    if before and before.name != payload.name:
+        await activity.record(
+            current_user.workspaceId, "workspace.renamed",
+            f"Workspace renamed from \"{before.name}\" to \"{payload.name}\"",
+            actor=activity.actor_for(current_user),
+        )
     return WorkspaceWithPlanResponse.model_validate(updated_workspace)
 
 
 @router.post("/current/api-key/rotate", response_model=WorkspaceRotateApiKeyResponse)
 async def rotate_workspace_api_key(
+    request: Request,
     current_user: User = Depends(require_role(Role.OWNER)),
 ) -> WorkspaceRotateApiKeyResponse:
     """
@@ -75,12 +85,17 @@ async def rotate_workspace_api_key(
         where={"id": current_user.workspaceId},
         data={"apiKey": new_api_key},
     )
+    await activity.record(
+        current_user.workspaceId, "api_key.rotated", "Workspace API key rotated; the old key no longer works",
+        actor=activity.actor_for(current_user), ip=client_ip(request),
+    )
     return WorkspaceRotateApiKeyResponse(apiKey=new_api_key)
 
 
 @router.put("/current/gemini-key", response_model=GeminiKeyUpdateResponse)
 async def save_gemini_key(
     payload: GeminiKeyUpdate,
+    request: Request,
     current_user: User = Depends(require_role(Role.OWNER)),
 ) -> GeminiKeyUpdateResponse:
     """
@@ -99,15 +114,22 @@ async def save_gemini_key(
             detail=str(e),
         )
 
+    existing = await db.workspace.find_unique(where={"id": current_user.workspaceId})
     await db.workspace.update(
         where={"id": current_user.workspaceId},
         data={"geminiApiKey": encrypt(payload.apiKey)},
+    )
+    await activity.record(
+        current_user.workspaceId, "gemini_key.set",
+        "Own Gemini API key " + ("replaced" if existing and existing.geminiApiKey else "added"),
+        actor=activity.actor_for(current_user), ip=client_ip(request),
     )
     return GeminiKeyUpdateResponse()
 
 
 @router.delete("/current/gemini-key", response_model=WorkspaceWithPlanResponse)
 async def delete_gemini_key(
+    request: Request,
     current_user: User = Depends(require_role(Role.OWNER)),
 ) -> WorkspaceWithPlanResponse:
     """
@@ -119,6 +141,10 @@ async def delete_gemini_key(
         where={"id": current_user.workspaceId},
         data={"geminiApiKey": None},
         include={"plan": True},
+    )
+    await activity.record(
+        current_user.workspaceId, "gemini_key.removed", "Own Gemini API key removed",
+        actor=activity.actor_for(current_user), ip=client_ip(request),
     )
     return WorkspaceWithPlanResponse.model_validate(updated_workspace)
 
@@ -151,6 +177,12 @@ async def set_platform_fallback(
         where={"id": current_user.workspaceId},
         data={"allowPlatformFallback": payload.enabled},
         include={"plan": True},
+    )
+    await activity.record(
+        current_user.workspaceId,
+        "platform_fallback.enabled" if payload.enabled else "platform_fallback.disabled",
+        "Platform key fallback " + ("enabled" if payload.enabled else "disabled"),
+        actor=activity.actor_for(current_user),
     )
     return WorkspaceWithPlanResponse.model_validate(updated_workspace)
 

@@ -19,7 +19,7 @@ from app.models.schemas import (
     VerifyEmailResponse,
     WorkspaceWithPlanResponse,
 )
-from app.services import email_verification
+from app.services import activity, email_verification
 
 logger = logging.getLogger("app.api.auth")
 router = APIRouter()
@@ -84,6 +84,11 @@ async def signup(
         }
     )
 
+    await activity.record(
+        workspace.id, "auth.signed_up", f"Account and workspace \"{ws_name}\" created",
+        actor=activity.actor_for(user), ip=client_ip(request),
+    )
+
     # 4. Verification email (after the response, so a slow mail provider never delays signup)
     background_tasks.add_task(email_verification.send_verification, user)
 
@@ -132,13 +137,20 @@ async def resend_verification(
 
 
 @router.post("/login", response_model=TokenResponse)
-async def login(payload: UserLoginRequest) -> TokenResponse:
+async def login(payload: UserLoginRequest, request: Request) -> TokenResponse:
     """
     User Login Endpoint.
     Validates user credentials against stored bcrypt hash and returns JWT access token.
     """
     user = await db.user.find_unique(where={"email": payload.email})
     if not user or not user.passwordHash or not verify_password(payload.password, user.passwordHash):
+        if user:
+            # Only attributable to a workspace when the email exists. Capped per hour so a
+            # password-guessing run cannot flood the table.
+            await activity.record(
+                user.workspaceId, "auth.login_failed", "Failed sign-in attempt (wrong password)",
+                actor=activity.actor_for(user), ip=client_ip(request), max_per_hour=20,
+            )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid email or password credentials.",
@@ -166,6 +178,9 @@ async def login(payload: UserLoginRequest) -> TokenResponse:
         }
     )
 
+    await activity.record(
+        workspace.id, "auth.login", "Signed in", actor=activity.actor_for(user), ip=client_ip(request),
+    )
     return TokenResponse(
         access_token=access_token,
         token_type="bearer",

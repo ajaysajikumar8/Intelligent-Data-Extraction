@@ -11,6 +11,8 @@
 import toast from 'react-hot-toast'
 import { clearSession, getToken } from './auth'
 import type {
+  ActivityCategory,
+  ActivityLogEntry,
   DocumentLogDetailResponse,
   DocumentLogResponse,
   ExtractionStatus,
@@ -194,7 +196,9 @@ export const templates = {
   duplicateFromLibrary: (slug: string) =>
     request<TemplateResponse>(`/templates/library/${slug}/duplicate`, { method: 'POST' }),
 
-  list: () => request<TemplateResponse[]>('/templates/'),
+  /** Active templates by default; the Templates page also needs inactive ones so they can be reactivated. */
+  list: (opts?: { includeInactive?: boolean }) =>
+    request<TemplateResponse[]>(`/templates/${opts?.includeInactive ? '?include_inactive=true' : ''}`),
 
   get: (id: string) => request<TemplateResponse>(`/templates/${id}`),
 
@@ -310,6 +314,20 @@ export const webhooks = {
   /** Rotate the inbound secret, invalidating the old URL immediately. */
   rotateInboundSecret: () =>
     request<InboundSecretResponse>('/webhooks/inbound/rotate', { method: 'POST' }),
+}
+
+// ── Activity log ────────────────────────────────────────────────────
+
+export const activity = {
+  /** Who changed what in this workspace, newest first. Workspace owners only. */
+  list: (params?: { skip?: number; limit?: number; category?: ActivityCategory }) => {
+    const qs = new URLSearchParams()
+    if (params?.skip !== undefined) qs.set('skip', String(params.skip))
+    if (params?.limit !== undefined) qs.set('limit', String(params.limit))
+    if (params?.category) qs.set('category', params.category)
+    const query = qs.toString()
+    return request<ActivityLogEntry[]>(`/activity${query ? `?${query}` : ''}`)
+  },
 }
 
 // ── Audit Logs ──────────────────────────────────────────────────────

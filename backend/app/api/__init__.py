@@ -1,5 +1,6 @@
 from fastapi import APIRouter
 
+from app.api.activity import router as activity_router
 from app.api.auth import router as auth_router
 from app.api.inbound import router as inbound_router
 from app.api.ingest import router as ingest_router
@@ -15,5 +16,6 @@ api_router.include_router(templates_router,  prefix="/templates",  tags=["Templa
 api_router.include_router(ingest_router,     prefix="/ingest",     tags=["Ingestion"])
 api_router.include_router(webhooks_router,   prefix="/webhooks",   tags=["Webhooks"])
 api_router.include_router(logs_router,       prefix="/logs",       tags=["Audit Logs"])
+api_router.include_router(activity_router,   prefix="/activity",   tags=["Activity"])
 # Inbound adapters: no /api/v1 prefix auth — workspace resolved via URL secret
 api_router.include_router(inbound_router,    prefix="/inbound",    tags=["Inbound Adapters"])

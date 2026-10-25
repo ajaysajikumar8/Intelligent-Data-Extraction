@@ -17,11 +17,12 @@ import logging
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from prisma.models import Workspace
+from prisma.models import User, Workspace
 from prisma.fields import Json
 
-from app.core.auth import get_current_workspace
+from app.core.auth import get_current_workspace, get_optional_user
 from app.core.db import db
+from app.services import activity
 from app.core.template_library import LIBRARY_TEMPLATES, get_library_template
 from app.models.schemas import (
     TemplateCreate,
@@ -71,6 +72,7 @@ def _to_response(template: Any) -> TemplateResponse:
 async def create_template(
     payload: TemplateCreate,
     workspace: Workspace = Depends(get_current_workspace),
+    current_user: User | None = Depends(get_optional_user),
 ) -> TemplateResponse:
     """
     Create a new extraction template for the authenticated workspace.
@@ -91,6 +93,10 @@ async def create_template(
         template.name,
         template.id,
         workspace.id,
+    )
+    await activity.record(
+        workspace.id, "template.created", f"Template \"{template.name}\" created",
+        actor=activity.actor_for(current_user), target_type="template", target_id=template.id,
     )
     return _to_response(template)
 
@@ -118,6 +124,7 @@ async def list_library_templates(
 async def duplicate_library_template(
     slug: str,
     workspace: Workspace = Depends(get_current_workspace),
+    current_user: User | None = Depends(get_optional_user),
 ) -> TemplateResponse:
     """
     Duplicate a pre-built library template into the user's workspace.
@@ -143,6 +150,10 @@ async def duplicate_library_template(
         slug,
         template.id,
         workspace.id,
+    )
+    await activity.record(
+        workspace.id, "template.created", f"Template \"{template.name}\" added from the library",
+        actor=activity.actor_for(current_user), target_type="template", target_id=template.id,
     )
     return _to_response(template)
 
@@ -210,6 +221,7 @@ async def update_template(
     template_id: str,
     payload: TemplateUpdate,
     workspace: Workspace = Depends(get_current_workspace),
+    current_user: User | None = Depends(get_optional_user),
 ) -> TemplateResponse:
     """
     Update a template's metadata or schema.
@@ -252,6 +264,20 @@ async def update_template(
         updated.id,
         updated.version,
     )
+    changes: list[str] = []
+    if payload.name is not None and payload.name != existing.name:
+        changes.append(f"renamed from \"{existing.name}\"")
+    if payload.description is not None and payload.description != existing.description:
+        changes.append("description changed")
+    if payload.schema_ is not None:
+        changes.append(f"fields changed (now version {updated.version})")
+    if payload.isActive is not None and payload.isActive != existing.isActive:
+        changes.append("activated" if payload.isActive else "deactivated")
+    if changes:
+        await activity.record(
+            workspace.id, "template.updated", f"Template \"{updated.name}\": " + ", ".join(changes),
+            actor=activity.actor_for(current_user), target_type="template", target_id=updated.id,
+        )
     return _to_response(updated)
 
 
@@ -263,6 +289,7 @@ async def update_template(
 async def delete_template(
     template_id: str,
     workspace: Workspace = Depends(get_current_workspace),
+    current_user: User | None = Depends(get_optional_user),
 ) -> None:
     """
     Soft-delete a template by setting `isActive = false`.
@@ -286,4 +313,8 @@ async def delete_template(
     )
     logger.info(
         "Template '%s' soft-deleted (ID: %s)", existing.name, template_id
+    )
+    await activity.record(
+        workspace.id, "template.deleted", f"Template \"{existing.name}\" deleted",
+        actor=activity.actor_for(current_user), target_type="template", target_id=template_id,
     )

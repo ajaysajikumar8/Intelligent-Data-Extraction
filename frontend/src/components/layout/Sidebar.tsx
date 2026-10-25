@@ -3,6 +3,7 @@ import { NavLink, useNavigate } from 'react-router-dom'
 import {
   BarChart3,
   FileText,
+  History,
   Layers,
   LogOut,
   Settings,
@@ -18,6 +19,7 @@ const NAV_ITEMS = [
   { to: '/dashboard', label: 'Overview',   Icon: BarChart3 },
   { to: '/submit',    label: 'Submit',      Icon: Upload },
   { to: '/logs',      label: 'Logs',        Icon: FileText },
+  { to: '/activity',  label: 'Activity',    Icon: History, ownerOnly: true },
   { to: '/templates', label: 'Templates',   Icon: Layers },
   { to: '/integrations', label: 'Integrations', Icon: Webhook },
   { to: '/settings',  label: 'Settings',    Icon: Settings },
@@ -92,7 +94,7 @@ export function Sidebar({ id, drawer, open, onClose }: SidebarProps) {
 
       {/* Navigation */}
       <nav className={styles.nav} aria-label="Main navigation">
-        {NAV_ITEMS.map(({ to, label, Icon }) => (
+        {NAV_ITEMS.filter((item) => !item.ownerOnly || user?.role === 'OWNER').map(({ to, label, Icon }) => (
           <NavLink
             key={to}
             to={to}

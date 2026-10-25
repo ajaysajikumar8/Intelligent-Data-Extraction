@@ -25,28 +25,28 @@ enum Role {
 
 // ApiKeySource — whose Gemini key paid for a document's extraction (see docs/adr/013)
 enum ApiKeySource {
-  WORKSPACE               // The workspace's own key (BYOAK)
-  PLATFORM                // The platform key, via paid-plan Platform Key Fallback
-  TRIAL_CREDIT            // The platform key, paid for with a free-trial credit
+  WORKSPACE // The workspace's own key (BYOAK)
+  PLATFORM // The platform key, via paid-plan Platform Key Fallback
+  TRIAL_CREDIT // The platform key, paid for with a free-trial credit
   WORKSPACE_THEN_PLATFORM // Started on the workspace's key, hit its quota, finished on the platform key
 }
 
 // Source — how a document entered the pipeline
 enum Source {
-  MANUAL   // User submitted via the dashboard (text paste or file upload)
-  API      // External system via REST API + workspace API key
-  EMAIL    // Email OAuth webhook push
-  WEBHOOK  // Generic inbound webhook (Zapier, Slack, etc.)
+  MANUAL // User submitted via the dashboard (text paste or file upload)
+  API // External system via REST API + workspace API key
+  EMAIL // Email OAuth webhook push
+  WEBHOOK // Generic inbound webhook (Zapier, Slack, etc.)
 }
 
 // ExtractionStatus — full pipeline lifecycle
 enum ExtractionStatus {
-  PENDING     // Received, not yet processed
-  PROCESSING  // Pipeline is actively running
-  SUCCESS     // Extraction completed and passed validation
+  PENDING // Received, not yet processed
+  PROCESSING // Pipeline is actively running
+  SUCCESS // Extraction completed and passed validation
   NEEDS_REVIEW // Extraction succeeded but with low/medium confidence, waiting for human
-  FAILED      // Gemini error or Pydantic validation failure
-  UNMATCHED   // No template matched the document intent
+  FAILED // Gemini error or Pydantic validation failure
+  UNMATCHED // No template matched the document intent
 }
 
 // WebhookEventType — only final states are valid webhook filters
@@ -86,36 +86,36 @@ model Plan {
 // -----------------------------------------------------------------------------
 
 model Workspace {
-  id             String   @id @default(uuid())
-  name           String
-  slug           String   @unique
-  apiKey         String   @unique @default(uuid())
+  id            String   @id @default(uuid())
+  name          String
+  slug          String   @unique
+  apiKey        String   @unique @default(uuid())
   // inboundSecret: cryptographically unguessable token embedded in inbound webhook
   // URL. Third-party email services (SendGrid, Mailgun) POST to:
   //   POST /api/v1/inbound/{inboundSecret}
   // Rotatable from the Settings page to revoke a leaked URL.
-  inboundSecret  String   @unique
-  planId         String
-  createdAt      DateTime @default(now())
+  inboundSecret String   @unique
+  planId        String
+  createdAt     DateTime @default(now())
 
   // BYOAK — Bring Your Own API Key
   // Stores the workspace owner's Gemini API key, encrypted at rest with Fernet.
   // null = no custom key configured; extractions use the platform key instead
   // (only if allowPlatformFallback is true).
-  geminiApiKey          String?
+  geminiApiKey              String?
   // Kill switch: must be explicitly enabled by the workspace owner to allow
   // the platform Gemini key to be used (and billed) on their behalf.
   // Defaults to false — platform budget is NEVER spent without explicit opt-in.
-  allowPlatformFallback Boolean  @default(false)
+  allowPlatformFallback     Boolean   @default(false)
   // Free-trial credits: extractions the platform key may run for this workspace while it has
   // no key of its own. Granted at signup (TRIAL_EXTRACTIONS), spent atomically per job and
   // refunded if the job fails — see docs/adr/008-free-trial-credits.md. Existing rows get 0.
-  trialExtractionsRemaining Int  @default(0)
+  trialExtractionsRemaining Int       @default(0)
   // Set once, atomically, when the trial is granted (on email verification — ADR-009). Doubles
   // as the "already granted" guard and the source for the daily grant cap. null = never granted.
-  trialGrantedAt DateTime?
+  trialGrantedAt            DateTime?
 
-  plan         Plan             @relation(fields: [planId], references: [id])
+  plan         Plan              @relation(fields: [planId], references: [id])
   users        User[]
   templates    Template[]
   documentLogs DocumentLog[]
@@ -131,18 +131,18 @@ model Workspace {
 // -----------------------------------------------------------------------------
 
 model User {
-  id           String   @id @default(uuid())
-  email        String   @unique
-  passwordHash String?
-  name         String?
-  googleId     String?  @unique
-  avatarUrl    String?
-  workspaceId  String
-  role         Role     @default(MEMBER)
-  isActive     Boolean  @default(true)
+  id              String    @id @default(uuid())
+  email           String    @unique
+  passwordHash    String?
+  name            String?
+  googleId        String?   @unique
+  avatarUrl       String?
+  workspaceId     String
+  role            Role      @default(MEMBER)
+  isActive        Boolean   @default(true)
   // null = address not yet confirmed. Existing users are backfilled as verified (ADR-009).
   emailVerifiedAt DateTime?
-  createdAt    DateTime @default(now())
+  createdAt       DateTime  @default(now())
 
   workspace    Workspace     @relation(fields: [workspaceId], references: [id])
   documentLogs DocumentLog[]
@@ -158,17 +158,17 @@ model User {
 // -----------------------------------------------------------------------------
 
 model Template {
-  id          String   @id @default(uuid())
-  workspaceId String
-  name        String
-  description String?
-  extractionSchema Json @map("schema")
-  version     Int      @default(1)
-  isActive    Boolean  @default(true)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id               String   @id @default(uuid())
+  workspaceId      String
+  name             String
+  description      String?
+  extractionSchema Json     @map("schema")
+  version          Int      @default(1)
+  isActive         Boolean  @default(true)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
 
-  workspace    Workspace     @relation(fields: [workspaceId], references: [id])
+  workspace    Workspace              @relation(fields: [workspaceId], references: [id])
   documentLogs DocumentLog[]
   corrections  ExtractionCorrection[]
 
@@ -206,9 +206,9 @@ model DocumentLog {
   modelUsed        String?
   createdAt        DateTime         @default(now())
 
-  workspace         Workspace         @relation(fields: [workspaceId], references: [id])
-  template          Template?         @relation(fields: [templateId], references: [id])
-  user              User?             @relation(fields: [userId], references: [id])
+  workspace         Workspace             @relation(fields: [workspaceId], references: [id])
+  template          Template?             @relation(fields: [templateId], references: [id])
+  user              User?                 @relation(fields: [userId], references: [id])
   webhookDeliveries WebhookDelivery[]
   correction        ExtractionCorrection?
 
@@ -253,14 +253,14 @@ model WebhookEndpoint {
 // -----------------------------------------------------------------------------
 
 model WebhookDelivery {
-  id              String   @id @default(uuid())
-  webhookId       String
-  documentLogId   String
-  statusCode      Int?
-  responseBody    String?
-  durationMs      Int?
-  error           String?
-  createdAt       DateTime @default(now())
+  id            String   @id @default(uuid())
+  webhookId     String
+  documentLogId String
+  statusCode    Int?
+  responseBody  String?
+  durationMs    Int?
+  error         String?
+  createdAt     DateTime @default(now())
 
   webhook     WebhookEndpoint @relation(fields: [webhookId], references: [id])
   documentLog DocumentLog     @relation(fields: [documentLogId], references: [id])
@@ -275,18 +275,46 @@ model WebhookDelivery {
 // -----------------------------------------------------------------------------
 
 model ExtractionCorrection {
-  id              String      @id @default(uuid())
-  documentLogId   String      @unique
-  templateId      String
-  
-  originalJson    Json
-  correctedJson   Json
-  templateVersion Int
-  createdAt       DateTime    @default(now())
+  id            String @id @default(uuid())
+  documentLogId String @unique
+  templateId    String
 
-  documentLog     DocumentLog @relation(fields: [documentLogId], references: [id])
-  template        Template    @relation(fields: [templateId], references: [id])
+  originalJson      Json
+  correctedJson     Json
+  templateVersion   Int
+  // The reviewer who made the correction (null for rows from before this was recorded).
+  correctedByUserId String?
+  createdAt         DateTime @default(now())
+
+  documentLog DocumentLog @relation(fields: [documentLogId], references: [id])
+  template    Template    @relation(fields: [templateId], references: [id])
 
   @@index([templateId])
   @@index([templateId, templateVersion])
+}
+
+// -----------------------------------------------------------------------------
+// ActivityLog — append-only record of who changed what (security + configuration
+// events). Never stores secret values or document contents. See docs/adr/015.
+// action is a dotted string ("template.updated"), not an enum, so adding an action
+// never needs a migration. actorLabel is a snapshot (email, "API key" or "System").
+// workspaceId is deliberately NOT a foreign key: audit rows must not block (or vanish with)
+// changes to the workspace row; a future workspace-deletion feature must purge them explicitly.
+// -----------------------------------------------------------------------------
+model ActivityLog {
+  id          String   @id @default(uuid())
+  workspaceId String
+  actorUserId String?
+  actorLabel  String
+  action      String
+  targetType  String?
+  targetId    String?
+  summary     String
+  // Only for auth and key events (see services/activity.py)
+  ipAddress   String?
+  createdAt   DateTime @default(now())
+
+  @@index([workspaceId, createdAt])
+  @@index([workspaceId, action])
+  @@index([createdAt])
 }

@@ -22,12 +22,13 @@ from datetime import timezone
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
-from prisma.models import Workspace
+from prisma.models import User, Workspace
 
-from app.core.auth import get_current_workspace
+from app.core.auth import get_current_workspace, get_optional_user
 from app.core.config import get_settings
 from app.core.db import db
 from app.core.security import generate_inbound_secret, hmac_sign
+from app.core.signup_guard import client_ip
 from app.core.url_safety import UnsafeUrlError, assert_url_allowed, safe_post
 from app.models.schemas import (
     InboundSecretResponse,
@@ -36,6 +37,7 @@ from app.models.schemas import (
     WebhookResponse,
     WebhookUpdate,
 )
+from app.services import activity
 
 logger = logging.getLogger("app.api.webhooks")
 router = APIRouter()
@@ -90,7 +92,9 @@ async def get_inbound_url(
     status_code=status.HTTP_200_OK,
 )
 async def rotate_inbound_secret(
+    request: Request,
     workspace: Workspace = Depends(get_current_workspace),
+    current_user: User | None = Depends(get_optional_user),
 ) -> InboundSecretResponse:
     """
     Rotate the inbound webhook secret. Immediately revokes the old URL.
@@ -104,6 +108,10 @@ async def rotate_inbound_secret(
     settings = get_settings()
     base = settings.API_BASE_URL.rstrip("/")
     logger.info("Inbound secret rotated for workspace %s", workspace.id)
+    await activity.record(
+        workspace.id, "inbound_secret.rotated", "Inbound webhook secret rotated; the old URL no longer works",
+        actor=activity.actor_for(current_user), ip=client_ip(request),
+    )
     return InboundSecretResponse(
         inboundSecret=updated.inboundSecret,  # type: ignore[arg-type]
         inboundUrl=f"{base}/api/v1/inbound/{updated.inboundSecret}",
@@ -119,6 +127,7 @@ async def rotate_inbound_secret(
 async def create_webhook(
     payload: WebhookCreate,
     workspace: Workspace = Depends(get_current_workspace),
+    current_user: User | None = Depends(get_optional_user),
 ) -> WebhookResponse:
     """
     Register a new outbound webhook endpoint for this workspace.
@@ -150,6 +159,10 @@ async def create_webhook(
             "eventTypes": [e.value for e in (payload.eventTypes or [])],
             "templateIds": payload.templateIds or [],
         }  # type: ignore[arg-type]
+    )
+    await activity.record(
+        workspace.id, "webhook.created", f"Webhook to {activity.describe_url(wh.url)} created",
+        actor=activity.actor_for(current_user), target_type="webhook", target_id=wh.id,
     )
     return WebhookResponse.model_validate(wh)
 
@@ -185,9 +198,10 @@ async def update_webhook(
     webhook_id: str,
     payload: WebhookUpdate,
     workspace: Workspace = Depends(get_current_workspace),
+    current_user: User | None = Depends(get_optional_user),
 ) -> WebhookResponse:
     """Update a webhook's URL, description, event/template filters, or active state."""
-    await _get_webhook_or_404(webhook_id, workspace.id)
+    existing = await _get_webhook_or_404(webhook_id, workspace.id)
 
     update_data: dict = {}
     if payload.url is not None:
@@ -209,6 +223,21 @@ async def update_webhook(
         where={"id": webhook_id},
         data=update_data,  # type: ignore[arg-type]
     )
+    changes: list[str] = []
+    if payload.url is not None and str(payload.url) != existing.url:
+        changes.append(f"URL changed from {activity.describe_url(existing.url)} to {activity.describe_url(updated.url)}")
+    if payload.description is not None and payload.description != existing.description:
+        changes.append("description changed")
+    if payload.eventTypes is not None or payload.templateIds is not None:
+        changes.append("event or template filters changed")
+    if payload.isActive is not None and payload.isActive != existing.isActive:
+        changes.append("enabled" if payload.isActive else "disabled")
+    if changes:
+        await activity.record(
+            workspace.id, "webhook.updated",
+            f"Webhook to {activity.describe_url(updated.url)}: " + ", ".join(changes),
+            actor=activity.actor_for(current_user), target_type="webhook", target_id=webhook_id,
+        )
     return WebhookResponse.model_validate(updated)
 
 
@@ -216,13 +245,18 @@ async def update_webhook(
 async def delete_webhook(
     webhook_id: str,
     workspace: Workspace = Depends(get_current_workspace),
+    current_user: User | None = Depends(get_optional_user),
 ) -> None:
     """Delete a webhook endpoint and all its delivery history records."""
-    await _get_webhook_or_404(webhook_id, workspace.id)
+    existing = await _get_webhook_or_404(webhook_id, workspace.id)
     # Delete delivery records first (FK constraint)
     await db.webhookdelivery.delete_many(where={"webhookId": webhook_id})
     await db.webhookendpoint.delete(where={"id": webhook_id})
     logger.info("Webhook %s deleted from workspace %s", webhook_id, workspace.id)
+    await activity.record(
+        workspace.id, "webhook.deleted", f"Webhook to {activity.describe_url(existing.url)} deleted",
+        actor=activity.actor_for(current_user), target_type="webhook", target_id=webhook_id,
+    )
 
 
 # ---------------------------------------------------------------------------

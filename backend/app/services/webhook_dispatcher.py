@@ -29,6 +29,7 @@ from prisma.models import DocumentLog
 from app.core.db import db
 from app.core.security import hmac_sign
 from app.core.url_safety import UnsafeUrlError, safe_post
+from app.services import activity
 
 logger = logging.getLogger("app.services.webhook_dispatcher")
 
@@ -232,3 +233,9 @@ async def _increment_failure(endpoint: Any) -> None:
             new_count,
         )
     await db.webhookendpoint.update(where={"id": endpoint.id}, data=update_data)
+    if update_data.get("isActive") is False:
+        await activity.record(
+            endpoint.workspaceId, "webhook.auto_disabled",
+            f"Webhook to {activity.describe_url(endpoint.url)} disabled after {new_count} consecutive failed deliveries",
+            actor=activity.SYSTEM, target_type="webhook", target_id=endpoint.id,
+        )

@@ -229,3 +229,22 @@ export interface InboundSecretResponse {
 export interface DocumentLogDetailResponse extends DocumentLogResponse {
   webhookDeliveries: WebhookDeliveryResponse[]
 }
+
+// ── Activity log ───────────────────────────────────────────────────────────
+
+export type ActivityCategory = 'auth' | 'keys' | 'webhooks' | 'templates' | 'documents' | 'workspace'
+
+export interface ActivityLogEntry {
+  id: string
+  actorUserId: string | null
+  /** Snapshot taken when it happened: an email, "API key" or "System". */
+  actorLabel: string
+  /** Dotted action, e.g. "template.updated". */
+  action: string
+  targetType: string | null
+  targetId: string | null
+  summary: string
+  /** Only recorded for sign-in and key events. */
+  ipAddress: string | null
+  createdAt: string
+}

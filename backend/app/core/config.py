@@ -98,6 +98,12 @@ class Settings(BaseSettings):
     EXTRACTION_MAX_IN_FLIGHT_PER_WORKSPACE: int = 25
 
     # ------------------------------------------------------------------ #
+    # Activity log (see docs/adr/015-activity-log.md). Entries older than this are deleted at
+    # startup. 0 keeps them forever.
+    # ------------------------------------------------------------------ #
+    ACTIVITY_RETENTION_DAYS: int = Field(default=365, ge=0)
+
+    # ------------------------------------------------------------------ #
     # Encryption — Fernet key for encrypting BYOAK Gemini keys at rest
     # Generate with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
     # If unset, keys are stored as plaintext (acceptable for local dev only).

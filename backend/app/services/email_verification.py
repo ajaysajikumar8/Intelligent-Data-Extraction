@@ -15,6 +15,7 @@ from prisma.models import User
 
 from app.core.config import get_settings
 from app.core.db import db
+from app.services import activity
 from app.core.email import send_verification_email
 from app.core.security import create_verification_token, decode_verification_token
 
@@ -56,7 +57,15 @@ async def verify_email(token: str) -> int:
         )
         if marked == 0:
             return 0
-        return await _grant_trial(tx, user.workspaceId, now)
+        granted = await _grant_trial(tx, user.workspaceId, now)
+
+    # Outside the transaction: recording must not hold it open or be able to roll the verification back.
+    await activity.record(
+        user.workspaceId, "auth.email_verified",
+        "Email address verified" + (f"; {granted} free extractions granted" if granted else ""),
+        actor=activity.actor_for(user),
+    )
+    return granted
 
 
 async def _grant_trial(tx, workspace_id: str, now: datetime) -> int:

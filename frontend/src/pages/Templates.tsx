@@ -40,7 +40,7 @@ export function Templates() {
   // `silent` refreshes in place without flashing the skeleton grid.
   const load = (silent = false) => {
     if (!silent) setLoading(true)
-    return Promise.all([tmplApi.list(), tmplApi.getLibrary()])
+    return Promise.all([tmplApi.list({ includeInactive: true }), tmplApi.getLibrary()])
       .then(([myTemplates, libTemplates]) => {
         setList(myTemplates)
         setLibraryList(libTemplates)

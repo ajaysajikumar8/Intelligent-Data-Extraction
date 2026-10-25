@@ -64,6 +64,7 @@ Names only: never put values in this repo. Set them in the platform dashboard.
 | `WEBHOOK_ALLOW_PRIVATE_HOSTS` | no | Leave unset (`false`). |
 | `TRIAL_EXTRACTIONS`, `TRIAL_DAILY_GRANT_CAP` | no | Your free-trial spend: at most `TRIAL_DAILY_GRANT_CAP` workspaces per day get `TRIAL_EXTRACTIONS` credits each; one credit is one document (about two Gemini calls). |
 | `GEMINI_FALLBACK_MODEL` | no | See above. |
+| `ACTIVITY_RETENTION_DAYS` | no | Days to keep [activity log](adr/015-activity-log.md) entries (default `365`, `0` = forever). Deleted at startup. |
 | `VITE_API_BASE_URL` | frontend | Set at build time on the frontend service. |
 
 ### Production startup checks

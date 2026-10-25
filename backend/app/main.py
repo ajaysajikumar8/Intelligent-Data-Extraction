@@ -9,7 +9,7 @@ from app.api import api_router
 from app.core.config import Settings, get_settings
 from app.core.db import db, connect_db, disconnect_db
 from app.core.validation import validation_error_handler
-from app.services import extraction_queue
+from app.services import activity, extraction_queue
 
 logger = logging.getLogger("app.main")
 
@@ -36,6 +36,7 @@ async def lifespan(application: FastAPI) -> AsyncGenerator[None, None]:
 
     # Documents left in flight by a crashed process would otherwise stay PENDING forever.
     await extraction_queue.recover_orphans()
+    await activity.purge_expired()
 
     yield
 

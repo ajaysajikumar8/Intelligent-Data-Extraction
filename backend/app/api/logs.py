@@ -21,15 +21,15 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from prisma import Json
-from prisma.models import Workspace
+from prisma.models import User, Workspace
 
 from typing import Any
 from pydantic import BaseModel
 from app.api.ingest import check_in_flight
-from app.core.auth import get_current_workspace
+from app.core.auth import get_current_workspace, get_optional_user
 from app.core.db import db
 from app.models.schemas import DocumentLogDetailResponse, DocumentLogResponse, WebhookDeliveryResponse
-from app.services import extraction_queue, failures, webhook_dispatcher
+from app.services import activity, extraction_queue, failures, webhook_dispatcher
 from app.services.extraction_pipeline import validate_correction
 
 logger = logging.getLogger("app.api.logs")
@@ -80,6 +80,7 @@ async def correct_document_extraction(
     document_id: str,
     payload: CorrectionRequest,
     workspace: Workspace = Depends(get_current_workspace),
+    current_user: User | None = Depends(get_optional_user),
 ) -> DocumentLogDetailResponse:
     """
     Accept human corrections for a document log (usually one in NEEDS_REVIEW).
@@ -131,7 +132,8 @@ async def correct_document_extraction(
     # 3. Record the correction so later extractions on this template can learn from it.
     # Skipped when the reviewer approved the values as they are: an "original == corrected"
     # example teaches nothing and would only use up one of the few prompt slots.
-    if validated_data != doc_log.extractedJson:
+    changed = validated_data != doc_log.extractedJson
+    if changed:
         await db.extractioncorrection.upsert(
             where={"documentLogId": doc_log.id},
             data={
@@ -141,10 +143,12 @@ async def correct_document_extraction(
                     "originalJson": json_lib.dumps(doc_log.extractedJson) if doc_log.extractedJson else "{}",
                     "correctedJson": json_lib.dumps(validated_data),
                     "templateVersion": doc_log.template.version,
+                    "correctedByUserId": current_user.id if current_user else None,
                 },
                 "update": {
                     "correctedJson": json_lib.dumps(validated_data),
                     "templateVersion": doc_log.template.version,
+                    "correctedByUserId": current_user.id if current_user else None,
                 },
             },
         )
@@ -152,6 +156,14 @@ async def correct_document_extraction(
     updated_log = await db.documentlog.find_unique(
         where={"id": doc_log.id},
         include={"webhookDeliveries": True},
+    )
+    label = doc_log.fileName or "pasted text"
+    await activity.record(
+        workspace.id,
+        "document.corrected" if changed else "document.approved",
+        f"Reviewed {label} (template \"{doc_log.template.name}\"): "
+        + ("values corrected" if changed else "approved as extracted"),
+        actor=activity.actor_for(current_user), target_type="document", target_id=doc_log.id,
     )
 
     # 4. Dispatch the final SUCCESS webhook
@@ -177,6 +189,7 @@ async def correct_document_extraction(
 async def retry_failed_document(
     document_id: str,
     workspace: Workspace = Depends(get_current_workspace),
+    current_user: User | None = Depends(get_optional_user),
 ) -> DocumentLogResponse:
     """
     Re-queue a FAILED document that failed for a retryable reason (AI busy, rate limited,
@@ -231,6 +244,10 @@ async def retry_failed_document(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="This document is already being retried.")
 
     logger.info("Retrying document %s (workspace %s)", doc_log.id, workspace.id)
+    await activity.record(
+        workspace.id, "document.retried", f"Retried a failed extraction ({failures.failure_code(doc_log.validationErrors)})",
+        actor=activity.actor_for(current_user), target_type="document", target_id=doc_log.id,
+    )
     extraction_queue.enqueue(
         doc_log_id=doc_log.id,
         workspace=workspace,
