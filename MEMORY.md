@@ -1,56 +1,33 @@
 # Project Memory — Intelligent Data Extraction
 
-> Living log of decisions and current state. Read this first every session. Update after every task.
-> For architecture/deployment details → see `docs/`.
+> Working log: current state, decisions, to-do. Read first, update after every task. Detail lives in `docs/adr/` and `git log -p -- MEMORY.md`.
+> Public repo: never put keys, passwords, usernames, IPs or internal URLs here.
 
----
+## Done (one line each → where the detail is)
+- Phases 0–6 (scaffold, schema, auth, 3-stage Gemini pipeline, React dashboard, webhooks, inbound adapters) → ADR 001–004.
+- BYOAK + platform fallback → 005. Async queue + backup model → 006. SSRF protection → 007. Free-trial credits → 008. Email verification + signup limits → 009.
+- Batch upload (2–20 files, one `/ingest` each, 3 in flight; server cap 25 per workspace; limited to trial credits; survives in-app navigation, "Leave site?" prompt while files are unsent) → 010.
+- "Try again" for failed text extractions (retry in place) → 011. Review screen for NEEDS_REVIEW (`ReviewForm`, `/correct` atomic) → 012.
+- `DocumentLog.apiKeySource` + `modelUsed` → 013. Prisma migrations (baseline `0_init`) → 014. Activity log, owner-only `GET /activity` + page → 015.
+- Production startup checks: `APP_ENV=production` refuses unsafe settings; launch checklist, DB steps, egress, alerts in `docs/deployment.md`.
+- Mobile nav drawer, app name via `lib/brand.ts` (placeholder, real brand name undecided), inactive templates stay listed.
+- Fixed: API-key-only ingestion returned 401 (`get_optional_user`).
+- Dropped on purpose: Logs "finished" badge (#18, not planned); #17 re-ask AI (rare); #23 exports parked (CSV already opens in Excel).
 
-## Decision Log
+## Open issues
+#13 upgrade flow (blocked on billing) · #17 re-ask AI · #19 durable worker · #20 egress rules (needs a host) · #23 Excel/Tally export · #25 CI check schema vs migrations.
 
-> Entries older than the current phase are condensed to keep this file small. Full narrative detail for any entry still lives in git commit history (`git log -p -- MEMORY.md`) and in `docs/adr/`.
+## Extraction-quality test (2026-10-25, live Gemini, 14 generated documents)
+14/14 routed correctly (non-documents → UNMATCHED), every field right, median 11 s/doc. Synthetic documents are easier than real scans: upper bound.
+Findings still to act on:
+1. The platform Gemini key is on a free tier (5 req/min, 20 req/day per model): needs a paid tier before launch. 429s are not retried although Google returns a 2–30 s `retryDelay`. `GEMINI_FALLBACK_MODEL` is unset and the configured primary model was overloaded while others worked.
+2. Dates are stored exactly as printed (`05/04/2026` is ambiguous): normalise to ISO.
+3. A credit note returns positive amounts and has no document-type field.
+4. Every field came back "High" confidence, so NEEDS_REVIEW never triggered: confidence is unproven; test messy/ambiguous documents.
+Test documents and scorer are not in the repo (could be added as a repeatable eval).
 
-- [2026-07-24 → 2026-08-20] — Phases 0–4 complete (docs structure, env vars, agent context files, FastAPI scaffold, Prisma schema, auth/multi-tenancy, Gemini 3-stage extraction pipeline). → `docs/adr/001`–`003`.
-- [2026-08-23 → 2026-08-30] — Phase 5 complete: Vite + React dashboard (all core pages), hybrid `/ingest/submit` (text+file) endpoint, TemplateSelect UI, Gemini model config fixes. → `docs/adr/004-vite-react-dashboard.md`
-- [2026-08-31 → 2026-09-16] — Phase 6 complete: async webhook dispatcher, Universal Inbound Adapter (multi-provider), Integrations/Logs UI, full technical audit + fixes, Template Library (config-as-code). 29/29 backend tests, 0 TS errors.
-- [2026-10-15] — BYOAK (Bring Your Own API Key) core implemented and verified end-to-end against live Gemini → `docs/adr/005-byoak-key-management.md`. Also fixed three pre-existing pipeline crash bugs and a regressed `GEMINI_MODEL` value.
-- [2026-10-15] — Consolidated agent context files to a single source of truth: `.agents/AGENTS.md` is now the only real file. `CLAUDE.md`, `.clinerules`, and root `AGENTS.md` are symlinks to it — zero copy-paste drift across Claude Code, Cline, Antigravity/Cursor/Copilot/Codex/Windsurf. Verified via md5sum + live edit propagation test.
-- [2026-10-15] — Archived stale `MEMORY.md` decision log entries (10.9KB → 3.4KB) and added a hard token-budget rule to `.agents/AGENTS.md` (archive when >~150 lines/5KB) so this file stays small going forward — see `## MEMORY.md Housekeeping` there.
-
----
-
-## To-Do (6-Phase Execution Roadmap)
-
-### ✅ Completed Setup + Phases 0–6
-> Collapsed (all items done, stable, no longer iterated on). Full checklist history: `git log -p -- MEMORY.md`.
-- [x] Setup: env vars, agent context files, docs structure, implementation plan
-- [x] Phase 1: FastAPI scaffold, CORS, `/health`, config
-- [x] Phase 2: Prisma schema, async client, Pydantic schemas
-- [x] Phase 3: Auth (JWT + API key), workspace endpoints, DB seeding — 3/3 tests passing
-- [x] Phase 4: Gemini service, 3-stage extraction pipeline, ingest + template endpoints
-- [x] Phase 5: Vite + React dashboard (all core pages), design system, TemplateSelect UI
-- [x] Phase 6: Webhook dispatcher, inbound adapters, audit logs — 17/17 tests passing
-
-### 🚧 Phase 7: BYOAK — see `docs/adr/005-byoak-key-management.md`
-- [x] Done: Fernet-encrypted key at rest + live validation, key/fallback endpoints (fallback paid-plan gated), pipeline key routing, Settings UI, verified against live Gemini.
-- [ ] Record `api_key_source` on `DocumentLog` (#12); "Upgrade" flow for the free-plan fallback block (#13, currently a toast).
-
-### 📋 Phase 8: Product review fixes (2026-10-15 new-user walkthrough)
-Backlog = GitHub issues, milestone "First-run experience" ([#1–#14](https://github.com/ajaysajikumar8/Intelligent-Data-Extraction/issues)). Labels: `bug`/`ux`/`product`/`tech-debt` + `p0`/`p1`/`p2`.
-- [x] #1, #4, async queue (ADR-006), backup model, SSRF fix (ADR-007) — done, pushed.
-- [x] #14 + #2 free-trial credits + first-run checklist → `docs/adr/008-free-trial-credits.md` (committed).
-- [x] #21 + #5/#6/#7 (2026-10-24) → `docs/adr/009-email-verification-and-signup-limits.md`. Trial credits now granted on **email verification** (Resend; no key = link logged), daily grant cap, disposable-domain block, per-IP/per-domain signup + resend rate limits (in-process), `/verify-email` page + unverified banner. #5 login hint only after typing; #6 field-level plain-language errors (backend handler + `ApiError.fieldErrors`); #7 `.test` rejection is intended, message friendlier. Schema: `User.emailVerifiedAt`, `Workspace.trialGrantedAt` (`db push` done; 417 existing users backfilled verified). 120/120 tests, flow verified live in browser. Committed (not pushed). Issues #2, #5, #6, #7, #14, #21 closed 2026-10-24. Dev ports: backend 8005, frontend 5178.
-- [x] #15 + #9 + #8 (2026-10-24, merged PR #22, closed): mobile drawer, app name via `lib/brand.ts` ("Intelligent Data Extraction" placeholder — real brand name still a product decision), Templates add-feedback (name-matched; backend still allows duplicate copies).
-- [x] #10 batch upload (2026-10-24, on main, issue closed) → `docs/adr/010-batch-upload.md`. Client-side: 2–20 files → one `/ingest` each, 3 in flight (`useBatchSubmit`, `BatchPanel`); server cap `EXTRACTION_MAX_IN_FLIGHT_PER_WORKSPACE`=25 (429). 122/122 tests; UI verified in Playwright with failing docs (no AI key) — success path with live Gemini not re-verified. Trial-credit pre-check added (batch limited to remaining credits). Unsubmitted files live only in the open tab. Logs page shows batch docs as plain rows (no batch grouping). Live Gemini was overloaded (AI_BUSY) when tested, so no live success run yet.
-- [x] #16 "Try again" (2026-10-24, branch `feat/retry-failed-extractions`) → `docs/adr/011-retry-failed-extractions.md`. `POST /logs/{id}/retry` retries in place (text only; files not stored); UI on Submit + Logs drawer. 127/127 tests. #17 deliberately not built: `BAD_AI_OUTPUT` was 1/301 in dev data (issue says measure first) — reopen if it shows up in real use.
-- [~] #11 review screen (2026-10-24, branch `feat/review-correct-flow`) → `docs/adr/012-review-screen-for-needs-review.md`. Field-by-field `ReviewForm` + "Approve as is"; `/correct` is now NEEDS_REVIEW-only, atomic, skips no-op learning examples. 131/131 tests. **Open:** Excel (.xlsx) + Tally export (needs product decisions; .xlsx needs a new npm package). Issue #11 stays open.
-- Local QA: `backend/.env` has relaxed signup limits (50/hour per IP and per domain; defaults 5 and 3) — local only, remove before deploying. Backend restarted 2026-10-24 on :8005 (log in scratchpad).
-- [x] #12 (2026-10-25) → `docs/adr/013-record-key-source-and-model.md`. `DocumentLog.apiKeySource` + `modelUsed` (schema pushed to dev DB; **prod needs the same push**). 136/136 tests. Shown in the Logs drawer. Old rows stay NULL.
-- [x] #18 (2026-10-25): built a Logs badge, then **removed it** — product call: users can check Logs; not worth the code or polling. Closed as not planned. Revisit email/browser notifications only if real users ask.
-- [x] Batch survives in-app navigation (2026-10-25): batch state lives in `BatchProvider` (dashboard layout), so opening Logs etc. mid-batch does not drop unsent files; browser "Leave site?" prompt while files are unsent (tab close/reload still loses them — needs persisted uploads, #19).
-- [ ] Noticed: extraction concurrency (4) is global, so one workspace's batch can occupy every slot and delay other workspaces' jobs (even instant NO_AI_KEY failures wait for a slot). Per-workspace in-flight cap (25) bounds the backlog, not the slot share. Revisit with #19 / before real traffic.
-- [x] #24 Activity log (2026-10-25, branch `feat/activity-log`) → `docs/adr/015-activity-log.md`. `ActivityLog` table (migration `20261025120000_add_activity_log`, **applied to dev; prod needs `migrate deploy`**), `services/activity.record()` hooked into auth/workspace/templates/webhooks/documents, owner-only `GET /activity` + Activity page. 166/166 tests, 43+5 browser checks. Also fixed: API-key-only ingestion was returning 401 (`get_optional_user`, commit 668a505); deactivated templates vanished from the Templates page (now listed with `include_inactive`). Open: no member/plan endpoints to record yet; export; scheduled purge.
-- [x] **Migrations in place** (2026-10-25, branch `chore/prisma-migrations`) → `docs/adr/014-prisma-migrations.md`. Baseline `0_init` verified against dev DB and an empty scratch DB; `_prisma_migrations` table now exists in the dev DB (baseline marked applied). From now: schema changes = `prisma migrate dev --name x` (ask first) + commit the SQL; deploys = `prisma migrate deploy && python -m app.db.seed`; never `db push` on prod. Follow-up: CI check that migrations match the schema. **Activity/audit log = issue #24** (next product feature before real customers).
-- [~] **Launch readiness** (2026-10-25, branch `chore/launch-readiness`): `docs/deployment.md` now has the launch checklist, production env table, DB migration steps, egress section for #20, alert table + SQL. App enforces it: `APP_ENV=production` makes startup refuse placeholder secrets / no `ENCRYPTION_KEY` / no Resend / localhost URLs / `WEBHOOK_ALLOW_PRIVATE_HOSTS` (warns on `TRUSTED_PROXY_HOPS=0`, relaxed signup limits); settings errors no longer echo raw values. **Still yours to do (needs a host + accounts):** Resend domain + keys, prod env vars incl. `APP_ENV=production`, `TRUSTED_PROXY_HOPS=1`, prod DB push + seed, egress rules (#20 stays open), alerts. Gmail `+alias` farming and per-process rate limits are accepted known gaps.
-- [ ] Test workspace "Verify All Workspace" is on the Pro plan (rollback: planId -> free). Dev DB holds ~20 throwaway QA users/workspaces.
-- [ ] Backlog (GitHub): new #15 phone layout, #16 "Try again", #17 re-ask on bad AI output, #19 durable worker, #20 egress restrictions (before prod); #12 extended (record model used). No plan-change path (billing unbuilt).
-- [ ] Private items (not in repo): pricing/billing, target customer, 3-5 user interviews, real extraction-quality test on sample invoices.
+## Before launch / known gaps
+- Needs a host + accounts: Resend domain and keys, production variables incl. `APP_ENV=production` and `TRUSTED_PROXY_HOPS=1`, `prisma migrate deploy && python -m app.db.seed` (prod needs the ActivityLog and key-source migrations), egress rules (#20), alerts.
+- Local only: `backend/.env` has relaxed signup limits (50/hour): remove before deploying. Dev DB holds many throwaway QA users and fake logs, plus a test workspace on the Pro plan (rollback: planId → free). Dev ports: backend 8005, frontend 5178.
+- Accepted gaps: Gmail `+alias` trial farming; rate limits and queue are per process (run one instance); unsent batch files and file retries need persisted uploads (#19); extraction concurrency (4) is global, so one workspace's batch can delay others (#19); no member/plan endpoints (nothing to audit yet); activity purge runs only at startup.
+- Not decided (not code): pricing/billing, target customer, 3–5 user interviews.
